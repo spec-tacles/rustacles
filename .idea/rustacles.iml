@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="JAVA_MODULE" version="4">
+  <component name="NewModuleRootManager" inherit-compiler-output="true">
+    <exclude-output />
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/brokers/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/gateway/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/gateway/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/gateway/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/brokers/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/brokers/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/brokers/benches" isTestSource="true" />
+      <excludeFolder url="file://$MODULE_DIR$/brokers/target" />
+      <excludeFolder url="file://$MODULE_DIR$/gateway/target" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>
