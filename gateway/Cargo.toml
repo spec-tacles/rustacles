@@ -1,0 +1,24 @@
+[package]
+name = "rustacles-gateway"
+description = "A Spectacles Gateway library for the Discord API."
+version = "0.1.0"
+authors = ["Texlo-Dev <richrancy@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hashbrown = "0.7.1"
+
+futures = "0.3.4"
+async-std = "1.5.0"
+async-tls = "0.6.0"
+async-native-tls = "0.3.3"
+log = "0.4.8"
+parking_lot = "0.10.0"
+rustacles-model = { path = "../models" }
+reqwest = "0.10.4"
+
+[dependencies.async-tungstenite]
+version = "0.4.2"
+features = ["async-native-tls"]

@@ -1,0 +1,19 @@
+[package]
+name = "rustacles-model"
+description = "Discord types and structures for Rustacles."
+repository = "https://github.com/spec-tacles/rustacles"
+version = "0.1.0"
+license = "MIT"
+authors = ["Texlo-Dev <richrancy@gmail.com>"]
+edition = "2018"
+
+[lib]
+name = "rustacles_model"
+
+[dependencies]
+serde = "1.0.88"
+serde_derive = "1.0.89"
+tokio-fs = "0.1.6"
+chrono = { version = "0.4.6", features = ["serde"] }
+serde_json = { version = "1.0.38", features = ["raw_value"] }
+serde_repr = "0.1"
