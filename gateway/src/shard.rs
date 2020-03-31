@@ -13,10 +13,13 @@ use async_std::{
 use async_std::prelude::*;
 use async_tungstenite::{
     stream::Stream as TungsteniteStream,
-    tungstenite::protocol::{Message as WebsocketMessage, WebSocketConfig},
+    tungstenite::{
+        Error as TungsteniteError,
+        protocol::{Message as WebsocketMessage, WebSocketConfig},
+    },
     WebSocketStream,
 };
-use futures::{channel::mpsc::{self, UnboundedSender}, Sink, stream::SplitStream, StreamExt};
+use futures::{channel::mpsc::{self, UnboundedSender}, FutureExt, Sink, stream::SplitStream, StreamExt, TryFutureExt, TryStreamExt};
 use parking_lot::Mutex;
 
 use rustacles_model::{
@@ -64,7 +67,7 @@ impl Heartbeat {
     }
 }
 
-
+/// A Spectacles gateway shard, representing a connection to the Discord Websocket.
 #[derive(Clone)]
 pub struct Shard {
     /// The bot token that this shard will use.
@@ -80,7 +83,7 @@ pub struct Shard {
     /// The websocket stream of the shard.
     pub stream: Arc<Mutex<Option<ShardStream>>>,
     /// The channel used to send shard messages to Discord..
-    pub sender: Arc<Mutex<UnboundedSender<WebsocketMessage>>>,
+    pub sender: Arc<Mutex<UnboundedSender<Result<WebsocketMessage>>>>,
     /// The current heartbeat of the shard.
     pub heartbeat: Arc<Mutex<Heartbeat>>,
     current_state: Arc<Mutex<String>>,
@@ -105,21 +108,114 @@ impl Shard {
         })
     }
 
-    /*pub fn identify(&self) -> Result<()> {
 
+    /// Attempts to automatically reconnect the shard to Discord.
+    pub async fn autoreconnect(&mut self) -> Result<()> {
+        if self.session_id.is_some() && self.heartbeat.lock().seq > 0 {
+            self.resume().await
+        } else {
+            self.reconnect().await
+        }
     }
 
-    pub async fn autoreconnect(&self) -> Result<()> {
+    /// Makes a request to reconnect the shard.
+    pub async fn reconnect(&mut self) -> Result<()> {
+        debug!("[Shard {}] Attempting to reconnect to gateway.", &self.info[0]);
+        self.reset_values().expect("[Shard] Failed to reset this shard for autoreconnecting.");
+        self.dial_gateway().await?;
 
+        Ok(())
     }
 
+    /// Resumes a shard's past session.
     pub async fn resume(&mut self) -> Result<()> {
-
+        debug!("[Shard {}] Attempting to resume gateway connection.", &self.info[0]);
+        let seq = self.heartbeat.lock().seq;
+        let token = self.token.clone();
+        let session = self.session_id.clone();
+        let sender = self.sender.clone();
+        match self.dial_gateway().await {
+            Ok(_) => {
+                let payload = ResumeSessionPacket {
+                    session_id: session.unwrap(),
+                    seq,
+                    token,
+                };
+                Shard::send(&sender, WebsocketMessage::text(payload.to_json()?))
+            },
+            Err(e) => Err(e)
+        }
     }
-    */
+
+    /// Change the status of the current shard.
+    pub fn change_status(&mut self, status: Status) -> Result<()> {
+        self.presence.status = status.to_string();
+        let oldpresence = self.presence.clone();
+
+        self.change_presence(oldpresence)
+    }
+
+    /// Change the activity of the current shard.
+    pub fn change_activity(&mut self, activity: ClientActivity) -> Result<()> {
+        self.presence.game = Some(activity);
+        let oldpresence = self.presence.clone();
+
+        self.change_presence(oldpresence)
+    }
+
+    /// Change the presence of the current shard.
+    pub fn change_presence(&mut self, presence: ClientPresence) -> Result<()> {
+        debug!("[Shard {}] Sending a presence change payload. {:?}", self.info[0], presence.clone());
+        self.send_payload(presence.clone())?;
+        self.presence = presence;
+
+        Ok(())
+    }
 
 
-    async fn connect(ws: &str) -> Result<(UnboundedSender<WebsocketMessage>, ShardStream)> {
+    /// Sends an IDENTIFY payload to the Discord Gateway.
+    pub fn identify(&mut self) -> Result<()> {
+        self.send_payload(IdentifyPacket {
+            large_threshold: 250,
+            token: self.token.clone(),
+            shard: self.info.clone(),
+            compress: false,
+            presence: Some(self.presence.clone()),
+            version: GATEWAY_VERSION,
+            properties: IdentifyProperties {
+                os: std::env::consts::OS.to_string(),
+                browser: String::from("spectacles-rs"),
+                device: String::from("spectacles-rs"),
+            },
+        })
+    }
+
+    /// Resolves a Websocket message into a ReceivePacket struct.
+    pub fn resolve_packet(&self, mess: &WebsocketMessage) -> Result<ReceivePacket> {
+        match mess {
+            WebsocketMessage::Binary(v) => serde_json::from_slice(v),
+            WebsocketMessage::Text(v) => serde_json::from_str(v),
+            _ => unreachable!("Invalid type detected."),
+        }.map_err(Error::from)
+    }
+
+    /// Sends a packet to the Discord Gateway.
+    pub fn send_payload<T: SendablePacket>(&self, payload: T) -> Result<()> {
+        let json = payload.to_json()?;
+        Shard::send(&self.sender, WebsocketMessage::text(json))
+    }
+
+    async fn begin_interval(mut shard: Shard, duration: Duration) {
+        let mut interval = stream::interval(duration);
+        let info = shard.info.clone();
+        while let Some(_) = interval.next().await {
+            if let Err(r) = shard.heartbeat() {
+                warn!("[Shard {}] Failed to perform heartbeat. {:?}", info[0], r);
+            }
+        }
+    }
+
+    async fn connect(ws: &str) -> Result<(UnboundedSender<Result<WebsocketMessage>>, ShardStream)> {
         let (wstream, _) = async_tungstenite::async_std::connect_async_with_config(ws, Some(WebSocketConfig {
             max_message_size: Some(usize::max_value()),
             max_frame_size: Some(usize::max_value()),
@@ -129,9 +225,109 @@ impl Shard {
         let (sink, stream) = wstream.split();
 
         async_std::task::spawn(async {
-            rx.forward(sink).await.expect("Failed to send message to sink.");
+            rx.map_err(|err| {
+                error!("Failed to select sink. {:?}", err);
+                TungsteniteError::Io(IoError::new(ErrorKind::Other, "Error whilst attempting to select sink."))
+            }).forward(sink).map(|_| ()).await;
         });
 
         Ok((tx, stream))
+    }
+
+    async fn dial_gateway(&mut self) -> Result<()> {
+        *self.current_state.lock() = String::from("connected");
+        let state = self.current_state.clone();
+        let orig_sender = self.sender.clone();
+        let orig_stream = self.stream.clone();
+        let heartbeat = self.heartbeat.clone();
+
+        let (sender, stream) = Shard::connect(&self.ws_uri).await?;
+        *orig_sender.lock() = sender;
+        *heartbeat.lock() = Heartbeat::new();
+        *state.lock() = String::from("handshake");
+        *orig_stream.lock() = Some(stream);
+
+        Ok(())
+    }
+
+    fn handle_packet(&mut self, pkt: ReceivePacket) -> Result<ShardAction> {
+        let info = self.info.clone();
+        let current_state = self.current_state.lock().clone();
+
+        let dispatch = {
+            if let Some(GatewayEvent::READY) = pkt.t {
+                let ready: ReadyPacket = serde_json::from_str(pkt.d.get())?;
+                *self.current_state.lock() = "connected".to_string();
+                self.session_id = Some(ready.session_id.clone());
+                trace!("[Shard {}] Received ready, set session ID as {}", &info[0], ready.session_id)
+            };
+
+            Ok(ShardAction::None)
+        };
+
+        let hello = {
+            if self.current_state.lock().clone() == "resume".to_string() {
+                return Ok(ShardAction::None);
+            };
+            let hello: HelloPacket = serde_json::from_str(pkt.d.get()).unwrap();
+            if hello.heartbeat_interval > 0 {
+                self.interval = Some(hello.heartbeat_interval);
+            }
+            if current_state == "handshake".to_string() {
+                let dn = Duration::from_millis(hello.heartbeat_interval);
+                let shard = self.clone();
+                async_std::task::spawn(async move {
+                    Shard::begin_interval(shard, dn).await;
+                });
+                return Ok(ShardAction::Identify);
+            }
+
+            Ok(ShardAction::AutoReconnect)
+        };
+
+        let heartbeat_ack = {
+            let mut hb = self.heartbeat.lock().clone();
+            hb.acknowledged = true;
+
+            Ok(ShardAction::None)
+        };
+
+        let invalid_session = {
+            let invalid: bool = serde_json::from_str(pkt.d.get())?;
+            if !invalid {
+                Ok(ShardAction::Identify)
+            } else { Ok(ShardAction::Resume) }
+        };
+
+        match pkt.op {
+            Opcodes::Dispatch => dispatch,
+            Opcodes::Hello => hello,
+            Opcodes::HeartbeatAck => heartbeat_ack,
+            Opcodes::Reconnect => Ok(ShardAction::Reconnect),
+            Opcodes::InvalidSession => invalid_session,
+            _ => Ok(ShardAction::None)
+        }
+    }
+
+    fn heartbeat(&mut self) -> Result<()> {
+        debug!("[Shard {}] Sending heartbeat.", self.info[0]);
+        let seq = self.heartbeat.lock().seq;
+
+        self.send_payload(HeartbeatPacket { seq })
+    }
+
+    fn reset_values(&mut self) -> Result<()> {
+        self.session_id = None;
+        *self.current_state.lock() = "disconnected".to_string();
+
+        let mut hb = self.heartbeat.lock();
+        hb.acknowledged = true;
+        hb.seq = 0;
+
+        Ok(())
+    }
+
+    fn send(sender: &Arc<Mutex<UnboundedSender<Result<WebsocketMessage>>>>, mess: WebsocketMessage) -> Result<()> {
+        sender.lock().start_send(Ok(mess)).map(|_| ()).map_err(From::from)
     }
 }
