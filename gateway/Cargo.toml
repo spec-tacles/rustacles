@@ -16,7 +16,6 @@ serde_json = "1.0.50"
 log = "0.4.8"
 parking_lot = "0.10.0"
 rustacles-model = { path = "../models" }
-reqwest = "0.10.4"
 
 [dependencies.async-tungstenite]
 version = "0.4.2"
@@ -25,3 +24,7 @@ features = ["async-native-tls"]
 [dependencies.async-std]
 version = "1.5.0"
 features = ["unstable"]
+
+[dependencies.reqwest]
+version = "0.10.4"
+features = ["json"]

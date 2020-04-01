@@ -46,7 +46,7 @@ use crate::{
 pub type ShardStream = SplitStream<WebSocketStream<TungsteniteStream<TcpStream, TlsStream<TcpStream>>>>;
 
 /// Various actions that a shard can perform.
-enum ShardAction {
+pub(crate) enum ShardAction {
     None,
     AutoReconnect,
     Reconnect,
@@ -250,7 +250,7 @@ impl Shard {
         Ok(())
     }
 
-    fn handle_packet(&mut self, pkt: ReceivePacket) -> Result<ShardAction> {
+    pub(crate) fn handle_packet(&mut self, pkt: ReceivePacket) -> Result<ShardAction> {
         let info = self.info.clone();
         let current_state = self.current_state.lock().clone();
 
