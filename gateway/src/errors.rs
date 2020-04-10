@@ -1,7 +1,4 @@
-use std::{
-    io::Error as IoError,
-    result::Result as StdResult,
-};
+use std::result::Result as StdResult;
 
 use async_tungstenite::tungstenite::error::Error as TungsteniteError;
 use futures::channel::mpsc::SendError;

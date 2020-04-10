@@ -2,7 +2,3 @@
 
 pub mod amqp;
 mod errors;
-
-#[cfg(test)]
-#[path = "./amqp_test.rs"]
-mod amqp_test;

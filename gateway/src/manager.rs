@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_tungstenite::tungstenite::Message as TungsteniteMessage;
 use futures::{
     channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
-    FutureExt, Sink, stream::SplitStream, StreamExt, TryFutureExt, TryStreamExt,
+    StreamExt, TryStreamExt,
 };
 use futures::Stream;
 use futures::task::{Context, Poll};
@@ -101,7 +101,7 @@ impl ShardManager {
         let token = if token.starts_with("Bot ")
         { token } else { format!("Bot {}", token) };
 
-        let mut res = reqwest::Client::new().get(&format!("{}/gateway/bot", API_BASE))
+        let res = reqwest::Client::new().get(&format!("{}/gateway/bot", API_BASE))
             .header("Authorization", token.clone())
             .send()
             .await?;
@@ -135,7 +135,7 @@ impl ShardManager {
 
         let spawn_task = async move {
             for id in 0..shard_count {
-                async_std::task::sleep(Duration::from_secs(6)).await;
+                //tokio::time::delay_for(Duration::from_secs(6)).await;
                 let count = shard_count.clone();
                 let shard = Shard::new(token.clone(), [id, count], ws.clone()).await;
                 let shard = Arc::new(Mutex::new(shard.expect("Failed to create shard")));
@@ -146,15 +146,15 @@ impl ShardManager {
                     sender: sender.clone(),
                 };
                 let split = shard.lock().stream.lock().take().unwrap().map_err(MessageSinkError::from);
-                async_std::task::spawn(async {
-                    split.forward(sink).await;
+                tokio::spawn(async {
+                    split.forward(sink).await.expect("Failed to forward shard message to sink");
                 });
 
                 tx.unbounded_send(shard).expect("Failed to send shard to stream");
             };
             info!("Sharder has completed spawning shards.");
         };
-        async_std::task::spawn(spawn_task);
+        tokio::spawn(spawn_task);
 
         (Spawner::new(rx), self.handle_events())
     }
@@ -165,7 +165,7 @@ impl ShardManager {
         self.event_sender = Some(sender.clone());
 
         let handler = async move {
-            while let Some((mut shard, message)) = stream.next().await {
+            while let Some((shard, message)) = stream.next().await {
                 let current_shard = shard.clone();
                 let mut shard = current_shard.lock().clone();
                 trace!("Websocket message received: {:?}", &message.clone());
@@ -193,7 +193,7 @@ impl ShardManager {
                 };
             }
         };
-        async_std::task::spawn(handler);
+        tokio::spawn(handler);
 
         EventHandler::new(receiver)
     }

@@ -1,20 +1,27 @@
+use std::borrow::Borrow;
+use std::pin::Pin;
+
+use async_std::task;
+use futures::{Stream, StreamExt};
+use futures::channel::mpsc::{unbounded, UnboundedReceiver};
+use futures::task::{Context, Poll};
 use lapin::{
-    Connection,
-    Consumer as ConsumerStream,
-    ConnectionProperties,
     BasicProperties,
     Channel,
+    Connection,
+    ConnectionProperties,
+    Consumer as ConsumerStream,
     ExchangeKind,
+    options::*,
     types::FieldTable,
-    options::*
 };
-use std::sync::Arc;
+
 use crate::errors::*;
 
 pub type AmqpProperties = BasicProperties;
 
 /// A stream of messages that are being consumed in the message queue.
-/*pub struct AmqpConsumer {
+pub struct AmqpConsumer {
     recv: UnboundedReceiver<Vec<u8>>
 }
 
@@ -26,14 +33,20 @@ impl AmqpConsumer {
     }
 }
 
-*/
+impl Stream for AmqpConsumer {
+    type Item = Vec<u8>;
+    fn poll_next(mut self: Pin<&mut Self>, waker: &mut Context) -> Poll<Option<Self::Item>> {
+        self.recv.poll_next_unpin(waker)
+    }
+}
+
 
 #[derive(Clone)]
 pub struct AmqpBroker {
     consumer: Consumer,
     producer: Producer,
     group: String,
-    subgroup: Option<String>
+    subgroup: Option<String>,
 }
 
 #[derive(Clone)]
@@ -76,7 +89,8 @@ impl AmqpBroker {
         Ok(())
     }
 
-    pub async fn consume(&self, evt: &str) -> Result<ConsumerStream> {
+    pub async fn consume(&self, evt: &str) -> Result<AmqpConsumer> {
+        let (tx, rx) = unbounded();
         let queue_name = match &self.subgroup {
             Some(g) => format!("{}:{}:{}", self.group, g, evt),
             None => format!("{}:{}", self.group, evt)
@@ -106,16 +120,22 @@ impl AmqpBroker {
                 durable: true,
                 ..Default::default()
             },
-            FieldTable::default()
-        );
-        let consumer: ConsumerStream = channel.basic_consume(
-            &queue_name,
+            FieldTable::default(),
+        ).await?;
+        let mut consumer: ConsumerStream = channel.basic_consume(
+            queue.borrow(),
             "",
             BasicConsumeOptions::default(),
-            FieldTable::default()
+            FieldTable::default(),
         ).await?;
+        task::spawn(async move {
+            while let Some(Ok(message)) = consumer.next().await {
+                tx.unbounded_send(message.data).expect("Failed to send message to stream");
+                channel.basic_ack(message.delivery_tag, BasicAckOptions::default()).await.expect("Failed to acknowledge message.");
+            }
+        });
 
-        Ok(consumer)
+        Ok(AmqpConsumer::new(rx))
     }
 }
 

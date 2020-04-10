@@ -1,26 +1,23 @@
 use std::{
     io::{Error as IoError, ErrorKind},
-    str::FromStr,
     sync::Arc,
     time::Duration,
 };
 
-use async_native_tls::TlsStream;
-use async_std::{
-    net::TcpStream,
-    stream,
-};
-use async_std::prelude::*;
 use async_tungstenite::{
     stream::Stream as TungsteniteStream,
+    tokio::TokioAdapter,
     tungstenite::{
         Error as TungsteniteError,
         protocol::{Message as WebsocketMessage, WebSocketConfig},
     },
     WebSocketStream,
 };
-use futures::{channel::mpsc::{self, UnboundedSender}, FutureExt, Sink, stream::SplitStream, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{channel::mpsc::{self, UnboundedSender}, FutureExt, stream::SplitStream, StreamExt, TryStreamExt};
 use parking_lot::Mutex;
+use tokio::net::TcpStream;
+use tokio::time;
+use tokio_tls::TlsStream;
 
 use rustacles_model::{
     gateway::{
@@ -43,7 +40,7 @@ use crate::{
     errors::{Error, Result},
 };
 
-pub type ShardStream = SplitStream<WebSocketStream<TungsteniteStream<TcpStream, TlsStream<TcpStream>>>>;
+pub type ShardStream = SplitStream<WebSocketStream<TungsteniteStream<TokioAdapter<TcpStream>, TokioAdapter<TlsStream<TokioAdapter<TokioAdapter<TcpStream>>>>>>>;
 
 /// Various actions that a shard can perform.
 pub(crate) enum ShardAction {
@@ -206,9 +203,10 @@ impl Shard {
     }
 
     async fn begin_interval(mut shard: Shard, duration: Duration) {
-        let mut interval = stream::interval(duration);
+        let mut interval = time::interval(duration);
         let info = shard.info.clone();
-        while let Some(_) = interval.next().await {
+        loop {
+            interval.tick().await;
             if let Err(r) = shard.heartbeat() {
                 warn!("[Shard {}] Failed to perform heartbeat. {:?}", info[0], r);
             }
@@ -216,7 +214,7 @@ impl Shard {
     }
 
     async fn connect(ws: &str) -> Result<(UnboundedSender<Result<WebsocketMessage>>, ShardStream)> {
-        let (wstream, _) = async_tungstenite::async_std::connect_async_with_config(ws, Some(WebSocketConfig {
+        let (wstream, _) = async_tungstenite::tokio::connect_async_with_config(ws, Some(WebSocketConfig {
             max_message_size: Some(usize::max_value()),
             max_frame_size: Some(usize::max_value()),
             ..Default::default()
@@ -224,7 +222,7 @@ impl Shard {
         let (tx, rx) = mpsc::unbounded();
         let (sink, stream) = wstream.split();
 
-        async_std::task::spawn(async {
+        tokio::spawn(async {
             rx.map_err(|err| {
                 error!("Failed to select sink. {:?}", err);
                 TungsteniteError::Io(IoError::new(ErrorKind::Other, "Error whilst attempting to select sink."))
@@ -276,7 +274,7 @@ impl Shard {
             if current_state == "handshake".to_string() {
                 let dn = Duration::from_millis(hello.heartbeat_interval);
                 let shard = self.clone();
-                async_std::task::spawn(async move {
+                tokio::spawn(async move {
                     Shard::begin_interval(shard, dn).await;
                 });
                 return Ok(ShardAction::Identify);

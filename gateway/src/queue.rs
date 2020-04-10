@@ -1,3 +1,4 @@
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_tungstenite::tungstenite::{Error as TungsteniteError, Message as TungsteniteMessage};
@@ -15,24 +16,29 @@ pub(crate) struct MessageSink {
 impl Sink<TungsteniteMessage> for MessageSink {
     type Error = MessageSinkError;
 
-    fn poll_ready(&mut self, _cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        self.sender.poll_ready().from_err()
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        self.sender.poll_ready(cx).map_err(From::from)
     }
 
-    fn start_send(&mut self, item: TungsteniteMessage) -> Result<(), Self::Error> {
-        self.sender.start_send((self.shard.clone(), item)).from_err()
+    fn start_send(mut self: Pin<&mut Self>, item: TungsteniteMessage) -> Result<(), Self::Error> {
+        let sd = self.shard.clone();
+        UnboundedSender::start_send(
+            &mut self.sender.clone(),
+            (sd, item),
+        ).map_err(From::from)
     }
 
-    fn poll_flush(&mut self, _cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        self.sender.poll_flush().from_err()
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
-
-    fn poll_close(&mut self, _cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        self.sender.poll_close().from_err()
+    fn poll_close(mut self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        self.sender.disconnect();
+        Poll::Ready(Ok(()))
     }
 }
 
+#[derive(Debug)]
 pub enum MessageSinkError {
     MpscSend(SendError),
     Tungstenite(TungsteniteError),
