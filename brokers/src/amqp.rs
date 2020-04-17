@@ -1,7 +1,6 @@
 use std::borrow::Borrow;
 use std::pin::Pin;
 
-use async_std::task;
 use futures::{Stream, StreamExt};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use futures::task::{Context, Poll};
@@ -128,7 +127,7 @@ impl AmqpBroker {
             BasicConsumeOptions::default(),
             FieldTable::default(),
         ).await?;
-        task::spawn(async move {
+        tokio::spawn(async move {
             while let Some(Ok(message)) = consumer.next().await {
                 tx.unbounded_send(message.data).expect("Failed to send message to stream");
                 channel.basic_ack(message.delivery_tag, BasicAckOptions::default()).await.expect("Failed to acknowledge message.");

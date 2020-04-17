@@ -6,6 +6,7 @@ use rustacles_brokers::amqp::AmqpBroker;
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
     let amqp_uri = env::var("AMQP_URI").expect("No AMQP URI provided");
     let broker = AmqpBroker::new(amqp_uri, "foo".to_string(), None).await.expect("Failed to initialize broker");
     let mut consumer = broker.consume("foobar").await.expect("Failed to consume event");

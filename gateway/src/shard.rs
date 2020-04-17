@@ -181,8 +181,8 @@ impl Shard {
             version: GATEWAY_VERSION,
             properties: IdentifyProperties {
                 os: std::env::consts::OS.to_string(),
-                browser: String::from("spectacles-rs"),
-                device: String::from("spectacles-rs"),
+                browser: String::from("rustacles"),
+                device: String::from("rustacles"),
             },
         })
     }
@@ -252,57 +252,47 @@ impl Shard {
         let info = self.info.clone();
         let current_state = self.current_state.lock().clone();
 
-        let dispatch = {
-            if let Some(GatewayEvent::READY) = pkt.t {
-                let ready: ReadyPacket = serde_json::from_str(pkt.d.get())?;
-                *self.current_state.lock() = "connected".to_string();
-                self.session_id = Some(ready.session_id.clone());
-                trace!("[Shard {}] Received ready, set session ID as {}", &info[0], ready.session_id)
-            };
-
-            Ok(ShardAction::None)
-        };
-
-        let hello = {
-            if self.current_state.lock().clone() == "resume".to_string() {
-                return Ok(ShardAction::None);
-            };
-            let hello: HelloPacket = serde_json::from_str(pkt.d.get()).unwrap();
-            if hello.heartbeat_interval > 0 {
-                self.interval = Some(hello.heartbeat_interval);
-            }
-            if current_state == "handshake".to_string() {
-                let dn = Duration::from_millis(hello.heartbeat_interval);
-                let shard = self.clone();
-                tokio::spawn(async move {
-                    Shard::begin_interval(shard, dn).await;
-                });
-                return Ok(ShardAction::Identify);
-            }
-
-            Ok(ShardAction::AutoReconnect)
-        };
-
-        let heartbeat_ack = {
-            let mut hb = self.heartbeat.lock().clone();
-            hb.acknowledged = true;
-
-            Ok(ShardAction::None)
-        };
-
-        let invalid_session = {
-            let invalid: bool = serde_json::from_str(pkt.d.get())?;
-            if !invalid {
-                Ok(ShardAction::Identify)
-            } else { Ok(ShardAction::Resume) }
-        };
-
         match pkt.op {
-            Opcodes::Dispatch => dispatch,
-            Opcodes::Hello => hello,
-            Opcodes::HeartbeatAck => heartbeat_ack,
+            Opcodes::Dispatch => {
+                if let Some(GatewayEvent::READY) = pkt.t {
+                    let ready: ReadyPacket = serde_json::from_str(pkt.d.get())?;
+                    *self.current_state.lock() = "connected".to_string();
+                    self.session_id = Some(ready.session_id.clone());
+                    trace!("[Shard {}] Received ready, set session ID as {}", &info[0], ready.session_id)
+                };
+
+                Ok(ShardAction::None)
+            },
+            Opcodes::HeartbeatAck => {
+                let mut hb = self.heartbeat.lock().clone();
+                hb.acknowledged = true;
+
+                Ok(ShardAction::None)
+            },
+            Opcodes::Hello => {
+                if self.current_state.lock().clone() == "resume".to_string() {
+                    return Ok(ShardAction::None);
+                };
+                let hello: HelloPacket = serde_json::from_str(pkt.d.get()).unwrap();
+                if hello.heartbeat_interval > 0 {
+                    self.interval = Some(hello.heartbeat_interval);
+                }
+                if current_state == "handshake".to_string() {
+                    let dn = Duration::from_millis(hello.heartbeat_interval);
+                    let shard = self.clone();
+                    tokio::spawn(Shard::begin_interval(shard, dn));
+                    return Ok(ShardAction::Identify);
+                }
+
+                Ok(ShardAction::AutoReconnect)
+            },
             Opcodes::Reconnect => Ok(ShardAction::Reconnect),
-            Opcodes::InvalidSession => invalid_session,
+            Opcodes::InvalidSession => {
+                let invalid: bool = serde_json::from_str(pkt.d.get())?;
+                if !invalid {
+                    Ok(ShardAction::Identify)
+                } else { Ok(ShardAction::Resume) }
+            },
             _ => Ok(ShardAction::None)
         }
     }

@@ -90,6 +90,8 @@ pub struct ShardManager {
     pub total_shards: usize,
     /// A collection of shards that have been spawned.
     pub shards: Arc<RwLock<ShardMap>>,
+    pub spawner: Option<Spawner>,
+    pub events: Option<EventHandler>,
     event_sender: Option<UnboundedSender<ShardEvent>>,
     message_stream: Option<MessageStream>,
     ws_uri: String,
@@ -116,30 +118,36 @@ impl ShardManager {
             token,
             total_shards,
             shards: Arc::new(RwLock::new(HashMap::new())),
+            spawner: None,
             event_sender: None,
+            events: None,
             message_stream: None,
             ws_uri: gb.url,
         })
     }
 
     /// Starts the shard spawning process. Returns two streams, one for successfully spawned shards, and one for shard events.
-    pub fn spawn(&mut self) -> (Spawner, EventHandler) {
+    pub fn spawn(&mut self) {
         let (sender, receiver) = unbounded();
-        self.message_stream = Some(receiver);
         let (tx, rx) = unbounded();
+        self.message_stream = Some(receiver);
+        self.spawner = Some(Spawner::new(rx));
+        self.events = Some(self.handle_events());
+
         let shard_count = self.total_shards.clone();
         let token = self.token.clone();
         let ws = self.ws_uri.clone();
-        let shardmap = self.shards.clone();
-        debug!("Attempting to spawn {} shards.", &shard_count);
+        let shard_map = self.shards.clone();
+        debug!("Preparing to spawn {} shards.", &shard_count);
 
-        let spawn_task = async move {
+        tokio::spawn(async move {
             for id in 0..shard_count {
-                //tokio::time::delay_for(Duration::from_secs(6)).await;
+                debug!("CREATING Shard {}", id);
+                tokio::time::delay_for(Duration::from_secs(6)).await;
                 let count = shard_count.clone();
                 let shard = Shard::new(token.clone(), [id, count], ws.clone()).await;
                 let shard = Arc::new(Mutex::new(shard.expect("Failed to create shard")));
-                shardmap.write().insert(id, shard.clone());
+                shard_map.write().insert(id, shard.clone());
 
                 let sink = MessageSink {
                     shard: shard.clone(),
@@ -153,10 +161,7 @@ impl ShardManager {
                 tx.unbounded_send(shard).expect("Failed to send shard to stream");
             };
             info!("Sharder has completed spawning shards.");
-        };
-        tokio::spawn(spawn_task);
-
-        (Spawner::new(rx), self.handle_events())
+        });
     }
 
     fn handle_events(&mut self) -> EventHandler {
@@ -198,3 +203,4 @@ impl ShardManager {
         EventHandler::new(receiver)
     }
 }
+

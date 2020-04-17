@@ -15,8 +15,12 @@ async fn main() {
         Ok(num) => ShardStrategy::Spawn(num.parse::<usize>().expect("Invalid integer provided")),
         Err(_) => ShardStrategy::Recommended
     };
-    let mut manager = ShardManager::new(token, strategy).await.expect("Failed to create shard manager");
-    let (mut spawner, mut events) = manager.spawn();
+    let mut manager = ShardManager::new(token, strategy)
+        .await
+        .expect("Failed to create shard manager");
+    let mut events = manager.events.take().unwrap();
+    let mut spawner = manager.spawner.take().unwrap();
+    manager.spawn();
 
     tokio::spawn(async move {
         while let Some(shard) = spawner.next().await {
