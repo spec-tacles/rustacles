@@ -8,29 +8,25 @@ use async_tungstenite::{
     stream::Stream as TungsteniteStream,
     tokio::TokioAdapter,
     tungstenite::{
-        Error as TungsteniteError,
         protocol::{Message as WebsocketMessage, WebSocketConfig},
+        Error as TungsteniteError,
     },
     WebSocketStream,
 };
-use futures::{channel::mpsc::{self, UnboundedSender}, FutureExt, stream::SplitStream, StreamExt, TryStreamExt};
+use futures::{
+    channel::mpsc::{self, UnboundedSender},
+    stream::SplitStream,
+    FutureExt, StreamExt, TryStreamExt,
+};
 use parking_lot::Mutex;
 use tokio::net::TcpStream;
 use tokio::time;
-use tokio_tls::TlsStream;
+use tokio_native_tls::TlsStream;
 
 use rustacles_model::{
     gateway::{
-        GatewayEvent,
-        HeartbeatPacket,
-        HelloPacket,
-        IdentifyPacket,
-        IdentifyProperties,
-        Opcodes,
-        ReadyPacket,
-        ReceivePacket,
-        ResumeSessionPacket,
-        SendablePacket,
+        GatewayEvent, HeartbeatPacket, HelloPacket, IdentifyPacket, IdentifyProperties, Opcodes,
+        ReadyPacket, ReceivePacket, ResumeSessionPacket, SendablePacket,
     },
     presence::{ClientActivity, ClientPresence, Status},
 };
@@ -40,7 +36,14 @@ use crate::{
     errors::{Error, Result},
 };
 
-pub type ShardStream = SplitStream<WebSocketStream<TungsteniteStream<TokioAdapter<TcpStream>, TokioAdapter<TlsStream<TokioAdapter<TokioAdapter<TcpStream>>>>>>>;
+pub type ShardStream = SplitStream<
+    WebSocketStream<
+        TungsteniteStream<
+            TokioAdapter<TcpStream>,
+            TokioAdapter<TlsStream<TokioAdapter<TokioAdapter<TcpStream>>>>,
+        >,
+    >,
+>;
 
 /// Various actions that a shard can perform.
 pub(crate) enum ShardAction {
@@ -60,7 +63,10 @@ pub struct Heartbeat {
 
 impl Heartbeat {
     fn new() -> Heartbeat {
-        Self { acknowledged: false, seq: 0 }
+        Self {
+            acknowledged: false,
+            seq: 0,
+        }
     }
 }
 
@@ -95,7 +101,10 @@ impl Shard {
             current_state: Arc::new(Mutex::new(String::from("handshake"))),
             token,
             session_id: None,
-            presence: ClientPresence { status: String::from("online"), ..Default::default() },
+            presence: ClientPresence {
+                status: String::from("online"),
+                ..Default::default()
+            },
             info,
             interval: None,
             heartbeat: Arc::new(Mutex::new(Heartbeat::new())),
@@ -104,7 +113,6 @@ impl Shard {
             ws_uri,
         })
     }
-
 
     /// Attempts to automatically reconnect the shard to Discord.
     pub async fn autoreconnect(&mut self) -> Result<()> {
@@ -117,8 +125,12 @@ impl Shard {
 
     /// Makes a request to reconnect the shard.
     pub async fn reconnect(&mut self) -> Result<()> {
-        debug!("[Shard {}] Attempting to reconnect to gateway.", &self.info[0]);
-        self.reset_values().expect("[Shard] Failed to reset this shard for autoreconnecting.");
+        debug!(
+            "[Shard {}] Attempting to reconnect to gateway.",
+            &self.info[0]
+        );
+        self.reset_values()
+            .expect("[Shard] Failed to reset this shard for autoreconnecting.");
         self.dial_gateway().await?;
 
         Ok(())
@@ -126,7 +138,10 @@ impl Shard {
 
     /// Resumes a shard's past session.
     pub async fn resume(&mut self) -> Result<()> {
-        debug!("[Shard {}] Attempting to resume gateway connection.", &self.info[0]);
+        debug!(
+            "[Shard {}] Attempting to resume gateway connection.",
+            &self.info[0]
+        );
         let seq = self.heartbeat.lock().seq;
         let token = self.token.clone();
         let session = self.session_id.clone();
@@ -139,8 +154,8 @@ impl Shard {
                     token,
                 };
                 Shard::send(&sender, WebsocketMessage::text(payload.to_json()?))
-            },
-            Err(e) => Err(e)
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -162,13 +177,16 @@ impl Shard {
 
     /// Change the presence of the current shard.
     pub fn change_presence(&mut self, presence: ClientPresence) -> Result<()> {
-        debug!("[Shard {}] Sending a presence change payload. {:?}", self.info[0], presence.clone());
+        debug!(
+            "[Shard {}] Sending a presence change payload. {:?}",
+            self.info[0],
+            presence.clone()
+        );
         self.send_payload(presence.clone())?;
         self.presence = presence;
 
         Ok(())
     }
-
 
     /// Sends an IDENTIFY payload to the Discord Gateway.
     pub fn identify(&mut self) -> Result<()> {
@@ -193,7 +211,8 @@ impl Shard {
             WebsocketMessage::Binary(v) => serde_json::from_slice(v),
             WebsocketMessage::Text(v) => serde_json::from_str(v),
             _ => unreachable!("Invalid type detected."),
-        }.map_err(Error::from)
+        }
+        .map_err(Error::from)
     }
 
     /// Sends a packet to the Discord Gateway.
@@ -214,19 +233,29 @@ impl Shard {
     }
 
     async fn connect(ws: &str) -> Result<(UnboundedSender<Result<WebsocketMessage>>, ShardStream)> {
-        let (wstream, _) = async_tungstenite::tokio::connect_async_with_config(ws, Some(WebSocketConfig {
-            max_message_size: Some(usize::max_value()),
-            max_frame_size: Some(usize::max_value()),
-            ..Default::default()
-        })).await?;
+        let (wstream, _) = async_tungstenite::tokio::connect_async_with_config(
+            ws,
+            Some(WebSocketConfig {
+                max_message_size: Some(usize::max_value()),
+                max_frame_size: Some(usize::max_value()),
+                ..Default::default()
+            }),
+        )
+        .await?;
         let (tx, rx) = mpsc::unbounded();
         let (sink, stream) = wstream.split();
 
         tokio::spawn(async {
             rx.map_err(|err| {
                 error!("Failed to select sink. {:?}", err);
-                TungsteniteError::Io(IoError::new(ErrorKind::Other, "Error whilst attempting to select sink."))
-            }).forward(sink).map(|_| ()).await;
+                TungsteniteError::Io(IoError::new(
+                    ErrorKind::Other,
+                    "Error whilst attempting to select sink.",
+                ))
+            })
+            .forward(sink)
+            .map(|_| ())
+            .await;
         });
 
         Ok((tx, stream))
@@ -258,17 +287,21 @@ impl Shard {
                     let ready: ReadyPacket = serde_json::from_str(pkt.d.get())?;
                     *self.current_state.lock() = "connected".to_string();
                     self.session_id = Some(ready.session_id.clone());
-                    trace!("[Shard {}] Received ready, set session ID as {}", &info[0], ready.session_id)
+                    trace!(
+                        "[Shard {}] Received ready, set session ID as {}",
+                        &info[0],
+                        ready.session_id
+                    )
                 };
 
                 Ok(ShardAction::None)
-            },
+            }
             Opcodes::HeartbeatAck => {
                 let mut hb = self.heartbeat.lock().clone();
                 hb.acknowledged = true;
 
                 Ok(ShardAction::None)
-            },
+            }
             Opcodes::Hello => {
                 if self.current_state.lock().clone() == "resume".to_string() {
                     return Ok(ShardAction::None);
@@ -285,15 +318,17 @@ impl Shard {
                 }
 
                 Ok(ShardAction::AutoReconnect)
-            },
+            }
             Opcodes::Reconnect => Ok(ShardAction::Reconnect),
             Opcodes::InvalidSession => {
                 let invalid: bool = serde_json::from_str(pkt.d.get())?;
                 if !invalid {
                     Ok(ShardAction::Identify)
-                } else { Ok(ShardAction::Resume) }
-            },
-            _ => Ok(ShardAction::None)
+                } else {
+                    Ok(ShardAction::Resume)
+                }
+            }
+            _ => Ok(ShardAction::None),
         }
     }
 
@@ -315,7 +350,14 @@ impl Shard {
         Ok(())
     }
 
-    fn send(sender: &Arc<Mutex<UnboundedSender<Result<WebsocketMessage>>>>, mess: WebsocketMessage) -> Result<()> {
-        sender.lock().start_send(Ok(mess)).map(|_| ()).map_err(From::from)
+    fn send(
+        sender: &Arc<Mutex<UnboundedSender<Result<WebsocketMessage>>>>,
+        mess: WebsocketMessage,
+    ) -> Result<()> {
+        sender
+            .lock()
+            .start_send(Ok(mess))
+            .map(|_| ())
+            .map_err(From::from)
     }
 }

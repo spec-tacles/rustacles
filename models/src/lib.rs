@@ -9,13 +9,12 @@ pub use user::User;
 #[derive(Serialize)]
 pub struct NoQuery;
 
-
-mod user;
-pub mod guild;
 pub mod channel;
-pub mod voice;
-pub mod invite;
 pub mod gateway;
-pub mod presence;
+pub mod guild;
+pub mod invite;
 pub mod message;
+pub mod presence;
 pub mod snowflake;
+mod user;
+pub mod voice;

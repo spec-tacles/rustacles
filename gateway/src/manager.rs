@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_tungstenite::tungstenite::Message as TungsteniteMessage;
+use futures::task::{Context, Poll};
+use futures::Stream;
 use futures::{
     channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
     StreamExt, TryStreamExt,
 };
-use futures::Stream;
-use futures::task::{Context, Poll};
-use hashbrown::HashMap;
 use parking_lot::{Mutex, RwLock};
+use std::collections::HashMap;
 
 use rustacles_model::gateway::{GatewayBot, Opcodes, ReceivePacket};
 
@@ -48,7 +48,7 @@ pub type ShardMap = HashMap<usize, ManagerShard>;
 
 // A stream of shards being spawned and emitting the ready event.
 pub struct Spawner {
-    inner: UnboundedReceiver<ManagerShard>
+    inner: UnboundedReceiver<ManagerShard>,
 }
 
 impl Spawner {
@@ -66,7 +66,7 @@ impl Stream for Spawner {
 
 /// A stream which serves as an event handler for a shard.
 pub struct EventHandler {
-    inner: UnboundedReceiver<ShardEvent>
+    inner: UnboundedReceiver<ShardEvent>,
 }
 
 impl EventHandler {
@@ -100,10 +100,14 @@ pub struct ShardManager {
 impl ShardManager {
     /// Creates a new shard manager, with the provided Discord token and strategy.
     pub async fn new(token: String, strategy: ShardStrategy) -> Result<ShardManager> {
-        let token = if token.starts_with("Bot ")
-        { token } else { format!("Bot {}", token) };
+        let token = if token.starts_with("Bot ") {
+            token
+        } else {
+            format!("Bot {}", token)
+        };
 
-        let res = reqwest::Client::new().get(&format!("{}/gateway/bot", API_BASE))
+        let res = reqwest::Client::new()
+            .get(&format!("{}/gateway/bot", API_BASE))
             .header("Authorization", token.clone())
             .send()
             .await?;
@@ -111,7 +115,7 @@ impl ShardManager {
         let gb: GatewayBot = res.json().await?;
         let total_shards = match strategy {
             ShardStrategy::Recommended => gb.shards,
-            ShardStrategy::Spawn(int) => int
+            ShardStrategy::Spawn(int) => int,
         };
 
         Ok(ShardManager {
@@ -153,13 +157,23 @@ impl ShardManager {
                     shard: shard.clone(),
                     sender: sender.clone(),
                 };
-                let split = shard.lock().stream.lock().take().unwrap().map_err(MessageSinkError::from);
+                let split = shard
+                    .lock()
+                    .stream
+                    .lock()
+                    .take()
+                    .unwrap()
+                    .map_err(MessageSinkError::from);
                 tokio::spawn(async {
-                    split.forward(sink).await.expect("Failed to forward shard message to sink");
+                    split
+                        .forward(sink)
+                        .await
+                        .expect("Failed to forward shard message to sink");
                 });
 
-                tx.unbounded_send(shard).expect("Failed to send shard to stream");
-            };
+                tx.unbounded_send(shard)
+                    .expect("Failed to send shard to stream");
+            }
             info!("Sharder has completed spawning shards.");
         });
     }
@@ -174,26 +188,39 @@ impl ShardManager {
                 let current_shard = shard.clone();
                 let mut shard = current_shard.lock().clone();
                 trace!("Websocket message received: {:?}", &message.clone());
-                let event = shard.resolve_packet(&message.clone()).expect("Failed to parse the shard message");
+                let event = shard
+                    .resolve_packet(&message.clone())
+                    .expect("Failed to parse the shard message");
                 if let Opcodes::Dispatch = event.op {
-                    sender.unbounded_send(ShardEvent {
-                        packet: event.clone(),
-                        shard: current_shard.clone(),
-                    }).expect("Failed to send shard event to stream");
+                    sender
+                        .unbounded_send(ShardEvent {
+                            packet: event.clone(),
+                            shard: current_shard.clone(),
+                        })
+                        .expect("Failed to send shard event to stream");
                 };
                 let action = shard.handle_packet(event.clone());
                 if let Ok(ShardAction::AutoReconnect) = action {
-                    shard.autoreconnect().await.expect("Shard failed to autoreconnect.");
+                    shard
+                        .autoreconnect()
+                        .await
+                        .expect("Shard failed to autoreconnect.");
                 } else if let Ok(ShardAction::Identify) = action {
                     debug!("[Shard {}] Identifying with the gateway.", &shard.info[0]);
                     if let Err(e) = shard.identify() {
-                        warn!("[Shard {}] Failed to identify with gateway. {:?}", &shard.info[0], e);
+                        warn!(
+                            "[Shard {}] Failed to identify with gateway. {:?}",
+                            &shard.info[0], e
+                        );
                     };
                 } else if let Ok(ShardAction::Reconnect) = action {
                     shard.reconnect().await.expect("Failed to reconnect shard.");
                     info!("[Shard {}] Reconnection successful.", &shard.info[0]);
                 } else if let Ok(ShardAction::Resume) = action {
-                    shard.resume().await.expect("Failed to resume shard session.");
+                    shard
+                        .resume()
+                        .await
+                        .expect("Failed to resume shard session.");
                     info!("[Shard {}] Successfully resumed session.", &shard.info[0]);
                 };
             }
@@ -203,4 +230,3 @@ impl ShardManager {
         EventHandler::new(receiver)
     }
 }
-

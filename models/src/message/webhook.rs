@@ -1,5 +1,5 @@
-use crate::{Snowflake, User};
 use crate::message::embed::Embed;
+use crate::{Snowflake, User};
 
 /// A simple solution to post messages in Discord channels from external sources.
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
@@ -98,7 +98,6 @@ impl ExecuteWebhookOptions {
         self.file = Some((name.to_string(), file));
         self
     }
-
 
     /// Adds an embed to the collection of embeds being sent with this embed.
     pub fn embed(mut self, embe: Embed) -> Self {

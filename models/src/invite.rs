@@ -29,9 +29,8 @@ pub struct Invite {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct PartialInvite {
     /// The code of the invite, if one is set.
-    pub code: String
+    pub code: String,
 }
-
 
 /// Detailed information about an invite.
 #[derive(Deserialize, Serialize, Clone, Debug)]

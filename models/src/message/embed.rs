@@ -76,7 +76,8 @@ impl Embed {
 
     /// Sets the author of this embed.
     pub fn set_author<F>(mut self, author: F) -> Self
-        where F: FnOnce(EmbedAuthor) -> EmbedAuthor
+    where
+        F: FnOnce(EmbedAuthor) -> EmbedAuthor,
     {
         self.author = Some(author(EmbedAuthor::default()));
         self
@@ -84,7 +85,8 @@ impl Embed {
 
     /// Sets the footer of this embed.
     pub fn set_footer<F>(mut self, footer: F) -> Self
-        where F: FnOnce(EmbedFooter) -> EmbedFooter
+    where
+        F: FnOnce(EmbedFooter) -> EmbedFooter,
     {
         self.footer = Some(footer(EmbedFooter::default()));
         self
@@ -92,7 +94,8 @@ impl Embed {
 
     /// Adds a thumbnail to this embed.
     pub fn set_thumbnail<T>(mut self, thumb: T) -> Self
-        where T: FnOnce(EmbedThumbnail) -> EmbedThumbnail
+    where
+        T: FnOnce(EmbedThumbnail) -> EmbedThumbnail,
     {
         self.thumbnail = Some(thumb(EmbedThumbnail::default()));
         self
@@ -100,7 +103,8 @@ impl Embed {
 
     /// Adds an image to this embed.
     pub fn set_image<F>(mut self, img: F) -> Self
-        where F: FnOnce(EmbedImage) -> EmbedImage
+    where
+        F: FnOnce(EmbedImage) -> EmbedImage,
     {
         self.image = Some(img(EmbedImage::default()));
         self

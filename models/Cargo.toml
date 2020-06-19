@@ -11,9 +11,9 @@ edition = "2018"
 name = "rustacles_model"
 
 [dependencies]
-serde = "1.0.88"
-serde_derive = "1.0.89"
-tokio-fs = "0.1.6"
-chrono = { version = "0.4.6", features = ["serde"] }
-serde_json = { version = "1.0.38", features = ["raw_value"] }
+serde = "1.0"
+serde_derive = "1.0"
+tokio-fs = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = { version = "1.0", features = ["raw_value"] }
 serde_repr = "0.1"

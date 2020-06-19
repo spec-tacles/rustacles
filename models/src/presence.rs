@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use serde_json::Error as JsonError;
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::gateway::{Opcodes, SendablePacket, SendPacket};
+use crate::gateway::{Opcodes, SendPacket, SendablePacket};
 use crate::Snowflake;
 
 /// Data about an activity that the user is participating in.
@@ -114,7 +114,7 @@ pub struct Presence {
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct PresenceUser {
     /// The ID of this user.
-    pub id: Snowflake
+    pub id: Snowflake,
 }
 
 /// The current presence of the connected Client.
@@ -197,7 +197,6 @@ pub struct ActivitySecrets {
     pub match_type: String,
 }
 
-
 impl SendablePacket for ClientPresence {
     fn to_json(self) -> Result<String, JsonError> {
         serde_json::to_string(&SendPacket {
@@ -250,7 +249,6 @@ impl Default for Status {
     }
 }
 
-
 impl Display for Status {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
@@ -258,7 +256,7 @@ impl Display for Status {
             Status::DnD => write!(f, "dnd"),
             Status::Idle => write!(f, "idle"),
             Status::Invisible => write!(f, "invisible"),
-            Status::Offline => write!(f, "offline")
+            Status::Offline => write!(f, "offline"),
         }
     }
 }
