@@ -1,9 +1,6 @@
 use chrono::{DateTime, FixedOffset};
 
-use crate::{
-    Snowflake,
-    user::User,
-};
+use crate::{user::User, Snowflake};
 
 /// A User that is part of a guild.
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]

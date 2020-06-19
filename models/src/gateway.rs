@@ -1,19 +1,15 @@
 //! Structs representing the various elements of the Discord gateway.
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use serde_json::{
-    Error as JsonError,
-    value::RawValue,
-};
+use serde_json::{value::RawValue, Error as JsonError};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+use crate::presence::Status;
 use crate::{
     guild::UnavailableGuild,
     presence::{ClientActivity, ClientPresence},
-    Snowflake,
-    User,
+    Snowflake, User,
 };
-use crate::presence::Status;
 
 /// Denotes structs that can be sent to the gateway.
 pub trait SendablePacket {
@@ -111,7 +107,6 @@ pub struct IdentifyPacket {
     pub presence: Option<ClientPresence>,
 }
 
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IdentifyProperties {
     /// The client's operating system.
@@ -149,7 +144,7 @@ pub struct ResumeSessionPacket {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HeartbeatPacket {
     /// The shard's last sequence number.
-    pub seq: u64
+    pub seq: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -162,7 +157,6 @@ pub struct RequestGuildMembers {
     /// The maximum number of members to send. If omitted, requests all members.
     pub limit: i32,
 }
-
 
 /// An Update Voice State packet.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -228,7 +222,6 @@ impl SendablePacket for UpdateStatus {
     }
 }
 
-
 impl SendablePacket for IdentifyPacket {
     fn to_json(self) -> Result<String, JsonError> {
         serde_json::to_string(&SendPacket {
@@ -243,7 +236,6 @@ impl SendablePacket for IdentifyPacket {
         Ok(json.as_bytes().to_vec())
     }
 }
-
 
 impl SendablePacket for UpdateVoiceState {
     fn to_json(self) -> Result<String, JsonError> {
@@ -331,7 +323,7 @@ pub struct ReadyPacket {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ResumedPacket {
     /// The servers that the client is connected to.
-    pub _trace: Vec<String>
+    pub _trace: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

@@ -16,17 +16,25 @@ pub enum Error {
 }
 
 impl From<TungsteniteError> for Error {
-    fn from(err: TungsteniteError) -> Self { Error::Tungstenite(err) }
+    fn from(err: TungsteniteError) -> Self {
+        Error::Tungstenite(err)
+    }
 }
 
 impl From<JsonError> for Error {
-    fn from(err: JsonError) -> Self { Error::Json(err) }
+    fn from(err: JsonError) -> Self {
+        Error::Json(err)
+    }
 }
 
 impl From<ReqwestError> for Error {
-    fn from(err: ReqwestError) -> Self { Error::Reqwest(err) }
+    fn from(err: ReqwestError) -> Self {
+        Error::Reqwest(err)
+    }
 }
 
 impl From<SendError> for Error {
-    fn from(_err: SendError) -> Self { Error::SendError }
+    fn from(_err: SendError) -> Self {
+        Error::SendError
+    }
 }

@@ -2,8 +2,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_tungstenite::tungstenite::{Error as TungsteniteError, Message as TungsteniteMessage};
-use futures::{channel::mpsc::{SendError, UnboundedSender}, Sink};
 use futures::task::{Context, Poll};
+use futures::{
+    channel::mpsc::{SendError, UnboundedSender},
+    Sink,
+};
 use parking_lot::Mutex;
 
 use crate::Shard;
@@ -22,10 +25,7 @@ impl Sink<TungsteniteMessage> for MessageSink {
 
     fn start_send(mut self: Pin<&mut Self>, item: TungsteniteMessage) -> Result<(), Self::Error> {
         let sd = self.shard.clone();
-        UnboundedSender::start_send(
-            &mut self.sender.clone(),
-            (sd, item),
-        ).map_err(From::from)
+        UnboundedSender::start_send(&mut self.sender.clone(), (sd, item)).map_err(From::from)
     }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Result<(), Self::Error>> {
@@ -43,7 +43,6 @@ pub enum MessageSinkError {
     MpscSend(SendError),
     Tungstenite(TungsteniteError),
 }
-
 
 impl From<SendError> for MessageSinkError {
     fn from(e: SendError) -> Self {

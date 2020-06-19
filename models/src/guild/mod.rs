@@ -2,24 +2,14 @@
 use chrono::{DateTime, FixedOffset};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::{
-    channel::Channel,
-    message::Emoji,
-    presence::Presence,
-    User,
-    voice::VoiceState,
-};
 use crate::snowflake::Snowflake;
+use crate::{channel::Channel, message::Emoji, presence::Presence, voice::VoiceState, User};
 
-pub use self::{
-    audit_log::*,
-    member::*,
-    role::*,
-};
+pub use self::{audit_log::*, member::*, role::*};
 
-mod role;
 mod audit_log;
 mod member;
+mod role;
 
 /// A Discord Guild, commonly referred to as a "server".
 #[derive(Deserialize, Debug, Serialize, Clone)]
@@ -240,7 +230,7 @@ impl ModifyGuildOptions {
 #[derive(Deserialize, Debug, Clone)]
 pub struct GuildPrune {
     /// The number of members that have been pruned.
-    pub pruned: i32
+    pub pruned: i32,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -362,7 +352,6 @@ impl CreateGuildOptions {
     }
 }
 
-
 /// A guild ban object.
 #[derive(Deserialize, Debug, Clone)]
 pub struct GuildBan {
@@ -403,7 +392,7 @@ pub struct GuildEmojisUpdate {
 #[derive(Deserialize, Debug, Clone)]
 pub struct GuildIntegrationsUpdate {
     /// The guild ID of the guild.
-    pub guild_id: Snowflake
+    pub guild_id: Snowflake,
 }
 
 /// Represents a packet sent when a user is removed from a guild.

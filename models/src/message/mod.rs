@@ -11,8 +11,8 @@ pub use self::emoji::*;
 pub use self::webhook::*;
 
 mod embed;
-mod webhook;
 mod emoji;
+mod webhook;
 
 /// Represents different types that can be sent to the Discord API.
 pub trait MessageResponse {
@@ -193,7 +193,6 @@ impl EditMessage {
         self
     }
 
-
     /// Adds an embed to be edited into this message.
     pub fn with_embed(mut self, embed: Embed) -> Self {
         self.embed = Some(embed);
@@ -224,7 +223,6 @@ impl ChannelMessagesQuery {
         }
     }
 
-
     /// Fetch messages from this channel that are around this message ID.
     pub fn around(mut self, id: u64) -> Self {
         if self.after.is_some() || self.before.is_some() {
@@ -252,7 +250,6 @@ impl ChannelMessagesQuery {
         self
     }
 }
-
 
 /// Represents an attachment sent by a user.
 #[derive(Deserialize, Serialize, Clone, Debug)]

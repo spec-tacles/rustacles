@@ -25,7 +25,10 @@ pub struct User {
 impl User {
     pub fn get_avatar_url(&self, format: &str) -> String {
         if let Some(ref h) = self.avatar {
-            format!("https://cdn.discordapp.com/avatars/{}/{}.{}", self.id.0, h, format)
+            format!(
+                "https://cdn.discordapp.com/avatars/{}/{}.{}",
+                self.id.0, h, format
+            )
         } else {
             let avatars = vec![
                 "6debd47ed13483642cf09e832ed0bc1b",
@@ -36,7 +39,10 @@ impl User {
             ];
             let hash = avatars[self.discriminator.parse::<usize>().unwrap() % avatars.len()];
 
-            format!("https://cdn.discordapp.com/avatars/{}/{}.{}", self.id.0, hash, format)
+            format!(
+                "https://cdn.discordapp.com/avatars/{}/{}.{}",
+                self.id.0, hash, format
+            )
         }
     }
 }

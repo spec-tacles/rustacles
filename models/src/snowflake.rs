@@ -1,7 +1,11 @@
 use std::fmt;
 
-use serde::{de, de::{Deserializer, Visitor}, Deserialize};
 use serde::ser::{Serialize, Serializer};
+use serde::{
+    de,
+    de::{Deserializer, Visitor},
+    Deserialize,
+};
 
 /// Represents a Twitter snowflake used as IDs in various Discord objects.
 #[derive(Default, Debug, Clone)]
@@ -19,7 +23,6 @@ impl From<u64> for Snowflake {
     }
 }
 
-
 impl fmt::Display for Snowflake {
     fn fmt(&self, fmtter: &mut fmt::Formatter) -> fmt::Result {
         write!(fmtter, "{}", self.0)
@@ -28,7 +31,8 @@ impl fmt::Display for Snowflake {
 
 impl Serialize for Snowflake {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where S: Serializer,
+    where
+        S: Serializer,
     {
         serializer.serialize_str(&self.0.to_string().as_str())
     }
@@ -44,18 +48,20 @@ impl<'de> Visitor<'de> for SnowflakeVisitor {
     }
 
     fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
-        where
-            E: de::Error,
+    where
+        E: de::Error,
     {
-        let i: u64 = value.parse().map_err(|_| de::Error::invalid_type(de::Unexpected::Str(value), &self))?;
+        let i: u64 = value
+            .parse()
+            .map_err(|_| de::Error::invalid_type(de::Unexpected::Str(value), &self))?;
         Ok(Snowflake(i))
     }
 }
 
 impl<'de> Deserialize<'de> for Snowflake {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Snowflake, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         deserializer.deserialize_identifier(SnowflakeVisitor)
     }
