@@ -1,12 +1,12 @@
 use std::borrow::Borrow;
 use std::pin::Pin;
 
+use futures::{Stream, StreamExt};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use futures::task::{Context, Poll};
-use futures::{Stream, StreamExt};
 use lapin::{
-    options::*, types::FieldTable, BasicProperties, Channel, Connection, ConnectionProperties,
-    Consumer as ConsumerStream, ExchangeKind,
+    BasicProperties, Channel, Connection, ConnectionProperties, Consumer as ConsumerStream, ExchangeKind,
+    options::*, types::FieldTable,
 };
 
 use crate::errors::*;
@@ -109,15 +109,6 @@ impl AmqpBroker {
                 FieldTable::default(),
             )
             .await?;
-        channel
-            .queue_bind(
-                &queue_name,
-                &group,
-                &event,
-                QueueBindOptions::default(),
-                FieldTable::default(),
-            )
-            .await?;
         let queue = channel
             .queue_declare(
                 &queue_name,
@@ -125,6 +116,15 @@ impl AmqpBroker {
                     durable: true,
                     ..Default::default()
                 },
+                FieldTable::default(),
+            )
+            .await?;
+        channel
+            .queue_bind(
+                &queue_name,
+                &group,
+                &event,
+                QueueBindOptions::default(),
                 FieldTable::default(),
             )
             .await?;
