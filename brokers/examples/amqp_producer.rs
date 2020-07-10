@@ -4,8 +4,8 @@ use rustacles_brokers::amqp::{AmqpBroker, AmqpProperties};
 
 #[tokio::main]
 async fn main() {
-    let amqp_uri = env::var("AMQP_URI").expect("No AMQP URI provided");
-    let broker = AmqpBroker::new(amqp_uri, "foo".to_string(), None)
+    let amqp_uri = env::var("AMQP_URI").unwrap_or("amqp://127.0.0.1:5672/%2f".into());
+    let broker = AmqpBroker::new(&amqp_uri, "foo".to_string(), None)
         .await
         .expect("Failed to initialize broker");
     match broker
