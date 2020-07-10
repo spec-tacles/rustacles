@@ -5,10 +5,11 @@ use std::{
 
 use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties, ExchangeKind,
-    message::Delivery, options::*, types::FieldTable,
+    options::*, types::FieldTable,
 };
+pub use lapin::message::Delivery;
 use nanoid::nanoid;
-use tokio::{
+pub use tokio::{
     stream::StreamExt,
     sync::{
         mpsc,
