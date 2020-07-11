@@ -118,7 +118,7 @@ impl AmqpBroker {
         let call_id = nanoid!();
         let properties = properties
             .with_correlation_id(call_id.as_str().into())
-            .with_reply_to(self.callback_queue.clone().ok_or(Error::Reply)?.into());
+            .with_reply_to(self.callback_queue.clone().ok_or(Error::Reply("RPC is not configured for this client".into()))?.into());
 
         let (tx, rx) = oneshot::channel();
         self.replies.lock().await.insert(call_id, tx);
@@ -136,8 +136,8 @@ impl AmqpBroker {
     }
 
     pub async fn reply_to(&self, msg: &Delivery, payload: Vec<u8>) -> Result<()> {
-        let reply_to = msg.properties.reply_to().as_ref().ok_or(Error::Reply)?.as_str();
-        let correlation_id = msg.properties.correlation_id().as_ref().ok_or(Error::Reply)?;
+        let reply_to = msg.properties.reply_to().as_ref().ok_or(Error::Reply("missing reply_to property".into()))?.as_str();
+        let correlation_id = msg.properties.correlation_id().as_ref().ok_or(Error::Reply("missing correlation_id property".into()))?;
         let props = AmqpProperties::default().with_correlation_id(correlation_id.clone());
 
         self.publisher
