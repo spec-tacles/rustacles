@@ -18,6 +18,9 @@ async fn main() {
     while let Some(payload) = consumer.next().await {
         let string = std::str::from_utf8(&payload.data).expect("Failed to decode string");
         println!("Message received: {}", string);
-        broker.reply_to(&payload, string.as_bytes().to_vec()).await.expect("Unable to send reply");
+        broker
+            .reply_to(&payload, string.as_bytes().to_vec())
+            .await
+            .expect("Unable to send reply");
     }
 }

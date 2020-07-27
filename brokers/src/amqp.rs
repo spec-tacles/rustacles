@@ -1,21 +1,14 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use lapin::{
-    BasicProperties, Channel, Connection, ConnectionProperties, ExchangeKind,
-    options::*, types::FieldTable,
-};
 pub use lapin::message::Delivery;
+use lapin::{
+    options::*, types::FieldTable, BasicProperties, Channel, Connection, ConnectionProperties,
+    ExchangeKind,
+};
 use nanoid::nanoid;
 pub use tokio::{
     stream::StreamExt,
-    sync::{
-        mpsc,
-        oneshot,
-        Mutex,
-    },
+    sync::{mpsc, oneshot, Mutex},
 };
 
 use crate::errors::*;
@@ -37,8 +30,7 @@ impl AmqpBroker {
         group: String,
         subgroup: Option<String>,
     ) -> Result<AmqpBroker> {
-        let connection =
-            Connection::connect(amqp_uri, ConnectionProperties::default()).await?;
+        let connection = Connection::connect(amqp_uri, ConnectionProperties::default()).await?;
         let publisher = connection.create_channel().await?;
 
         Ok(Self {
@@ -55,21 +47,29 @@ impl AmqpBroker {
     /// message, it should use the `AmqpBroker::reply_to` function to send a response.
     pub async fn with_rpc(mut self) -> Result<Self> {
         let channel = self.connection.create_channel().await?;
-        let callback = channel.queue_declare("", QueueDeclareOptions {
-            exclusive: true,
-            ..QueueDeclareOptions::default()
-        }, FieldTable::default()).await?;
+        let callback = channel
+            .queue_declare(
+                "",
+                QueueDeclareOptions {
+                    exclusive: true,
+                    ..QueueDeclareOptions::default()
+                },
+                FieldTable::default(),
+            )
+            .await?;
         self.callback_queue = Some(callback.name().to_string());
 
-        let mut callback_consumer = channel.basic_consume(
-            callback.name().as_str(),
-            "",
-            BasicConsumeOptions {
-                no_ack: true,
-                ..BasicConsumeOptions::default()
-            },
-            FieldTable::default()
-        ).await?;
+        let mut callback_consumer = channel
+            .basic_consume(
+                callback.name().as_str(),
+                "",
+                BasicConsumeOptions {
+                    no_ack: true,
+                    ..BasicConsumeOptions::default()
+                },
+                FieldTable::default(),
+            )
+            .await?;
 
         let replies = Arc::clone(&self.replies);
         tokio::spawn(async move {
@@ -104,7 +104,8 @@ impl AmqpBroker {
                 BasicPublishOptions::default(),
                 payload,
                 properties,
-            ).await?;
+            )
+            .await?;
 
         Ok(())
     }
@@ -118,7 +119,12 @@ impl AmqpBroker {
         let call_id = nanoid!();
         let properties = properties
             .with_correlation_id(call_id.as_str().into())
-            .with_reply_to(self.callback_queue.clone().ok_or(Error::Reply("RPC is not configured for this client".into()))?.into());
+            .with_reply_to(
+                self.callback_queue
+                    .clone()
+                    .ok_or(Error::Reply("RPC is not configured for this client".into()))?
+                    .into(),
+            );
 
         let (tx, rx) = oneshot::channel();
         self.replies.lock().await.insert(call_id, tx);
@@ -129,25 +135,30 @@ impl AmqpBroker {
                 evt,
                 Default::default(),
                 payload,
-                properties
-            ).await?;
+                properties,
+            )
+            .await?;
 
         Ok(rx.await?)
     }
 
     pub async fn reply_to(&self, msg: &Delivery, payload: Vec<u8>) -> Result<()> {
-        let reply_to = msg.properties.reply_to().as_ref().ok_or(Error::Reply("missing reply_to property".into()))?.as_str();
-        let correlation_id = msg.properties.correlation_id().as_ref().ok_or(Error::Reply("missing correlation_id property".into()))?;
+        let reply_to = msg
+            .properties
+            .reply_to()
+            .as_ref()
+            .ok_or(Error::Reply("missing reply_to property".into()))?
+            .as_str();
+        let correlation_id = msg
+            .properties
+            .correlation_id()
+            .as_ref()
+            .ok_or(Error::Reply("missing correlation_id property".into()))?;
         let props = AmqpProperties::default().with_correlation_id(correlation_id.clone());
 
         self.publisher
-            .basic_publish(
-                "",
-                reply_to,
-                Default::default(),
-                payload,
-                props,
-            ).await?;
+            .basic_publish("", reply_to, Default::default(), payload, props)
+            .await?;
 
         Ok(())
     }
@@ -206,8 +217,7 @@ impl AmqpBroker {
                     .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
                     .await
                     .expect("Failed to acknowledge message.");
-                tx.send(delivery)
-                    .expect("Failed to send message to stream");
+                tx.send(delivery).expect("Failed to send message to stream");
             }
         });
 
