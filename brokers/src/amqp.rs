@@ -224,3 +224,52 @@ impl AmqpBroker {
         Ok(rx)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::AmqpBroker;
+    use crate::errors::*;
+    use tokio::{
+        spawn,
+        time::{timeout, Duration},
+    };
+
+    #[tokio::test]
+    async fn makes_rpc_call() -> Result<()> {
+        let client = AmqpBroker::new("amqp://localhost:5672/%2f", "foo".into(), None).await?;
+        let rpc_client = AmqpBroker::new("amqp://localhost:5672/%2f", "foo".into(), None)
+            .await?
+            .with_rpc()
+            .await?;
+
+        println!("Connected both clients");
+
+        let mut consumer = client
+            .consume("bar")
+            .await
+            .expect("Unable to begin message consumption");
+
+        spawn(async move {
+            let message = consumer.recv().await.expect("Consumer closed unexpectedly");
+
+            println!("Received message: {:?}", message);
+            client
+                .reply_to(&message, "def".as_bytes().to_vec())
+                .await
+                .expect("Unable to send response");
+        });
+
+        println!("Attempting RPC call");
+
+        let response = timeout(
+            Duration::from_secs(5),
+            rpc_client.call("bar", "abc".as_bytes().to_vec(), Default::default()),
+        )
+        .await
+        .expect("Test timed out")?;
+
+        assert_eq!(response.data.as_slice(), "def".as_bytes());
+
+        Ok(())
+    }
+}
