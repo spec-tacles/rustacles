@@ -33,6 +33,18 @@ impl AmqpBroker {
         let connection = Connection::connect(amqp_uri, ConnectionProperties::default()).await?;
         let publisher = connection.create_channel().await?;
 
+        publisher
+            .exchange_declare(
+                &group,
+                ExchangeKind::Direct,
+                ExchangeDeclareOptions {
+                    durable: true,
+                    ..Default::default()
+                },
+                FieldTable::default(),
+            )
+            .await?;
+
         Ok(Self {
             connection,
             publisher,
@@ -101,7 +113,10 @@ impl AmqpBroker {
             .basic_publish(
                 self.group.as_str(),
                 evt,
-                BasicPublishOptions::default(),
+                BasicPublishOptions {
+                    mandatory: true,
+                    immediate: false,
+                },
                 payload,
                 properties,
             )
@@ -170,17 +185,6 @@ impl AmqpBroker {
             None => format!("{}:{}", self.group, evt),
         };
         let channel = self.connection.create_channel().await?;
-        channel
-            .exchange_declare(
-                &self.group,
-                ExchangeKind::Direct,
-                ExchangeDeclareOptions {
-                    durable: true,
-                    ..Default::default()
-                },
-                FieldTable::default(),
-            )
-            .await?;
         let queue = channel
             .queue_declare(
                 &queue_name,
@@ -266,10 +270,9 @@ mod test {
             rpc_client.call("bar", "abc".as_bytes().to_vec(), Default::default()),
         )
         .await
-        .expect("Test timed out")?;
+        .expect("Call timed out")?;
 
         assert_eq!(response.data.as_slice(), "def".as_bytes());
-
         Ok(())
     }
 }
