@@ -18,6 +18,4 @@ This library features several important crates to help you get started.
 
 [Rustacles Models](models/) - A collection of data types than are used for serializing and deserializing data from the Discord API.
 
-[Rustacles REST](rest/) - A Spectacles implementation of Discord's REST API methods.
-
 See each crate for more details on how to get started with your application.
