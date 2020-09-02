@@ -1,9 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Weak},
+};
 
-pub use lapin::message::Delivery;
 use lapin::{
-    options::*, types::FieldTable, BasicProperties, Channel, Connection, ConnectionProperties,
-    ExchangeKind,
+    message::Delivery, options::*, types::FieldTable, BasicProperties, Channel, Connection,
+    ConnectionProperties, ExchangeKind,
 };
 use nanoid::nanoid;
 pub use tokio::{
@@ -15,12 +17,89 @@ use crate::errors::*;
 
 pub type AmqpProperties = BasicProperties;
 
+#[derive(Debug, Clone)]
+pub struct Message {
+    pub channel: Weak<Channel>,
+    pub data: Vec<u8>,
+    pub properties: BasicProperties,
+    pub delivery_tag: u64,
+    pub routing_key: String,
+    pub exchange: String,
+    pub redelivered: bool,
+}
+
+impl From<(Weak<Channel>, Delivery)> for Message {
+    fn from(data: (Weak<Channel>, Delivery)) -> Self {
+        Self {
+            channel: data.0,
+            data: data.1.data,
+            properties: data.1.properties,
+            delivery_tag: data.1.delivery_tag,
+            routing_key: data.1.routing_key.to_string(),
+            exchange: data.1.exchange.to_string(),
+            redelivered: data.1.redelivered,
+        }
+    }
+}
+
+impl Message {
+    pub async fn ack(&self) -> Result<()> {
+        match self.channel.upgrade() {
+            Some(channel) => Ok(channel
+                .basic_ack(self.delivery_tag, BasicAckOptions::default())
+                .await?),
+            None => Ok(()),
+        }
+    }
+
+    pub async fn reject(&self) -> Result<()> {
+        match self.channel.upgrade() {
+            Some(channel) => Ok(channel
+                .basic_reject(self.delivery_tag, BasicRejectOptions::default())
+                .await?),
+            None => Ok(()),
+        }
+    }
+
+    pub async fn nack(&self) -> Result<()> {
+        match self.channel.upgrade() {
+            Some(channel) => Ok(channel
+                .basic_nack(self.delivery_tag, BasicNackOptions::default())
+                .await?),
+            None => Ok(()),
+        }
+    }
+
+    pub async fn reply(&self, payload: Vec<u8>) -> Result<()> {
+        if let Some(channel) = self.channel.upgrade() {
+            let reply_to = self
+                .properties
+                .reply_to()
+                .as_ref()
+                .ok_or(Error::Reply("missing reply_to property".into()))?
+                .as_str();
+            let correlation_id = self
+                .properties
+                .correlation_id()
+                .as_ref()
+                .ok_or(Error::Reply("missing correlation_id property".into()))?;
+            let props = AmqpProperties::default().with_correlation_id(correlation_id.clone());
+
+            channel
+                .basic_publish("", reply_to, Default::default(), payload, props)
+                .await?;
+        }
+
+        Ok(())
+    }
+}
+
 pub struct AmqpBroker {
     connection: Connection,
     publisher: Channel,
     group: String,
     subgroup: Option<String>,
-    replies: Arc<Mutex<HashMap<String, oneshot::Sender<Delivery>>>>,
+    replies: Arc<Mutex<HashMap<String, oneshot::Sender<Message>>>>,
     callback_queue: Option<String>,
 }
 
@@ -58,7 +137,7 @@ impl AmqpBroker {
     /// Setup a consumer to send responses back to a publisher. When the consumer receives a
     /// message, it should use the `AmqpBroker::reply_to` function to send a response.
     pub async fn with_rpc(mut self) -> Result<Self> {
-        let channel = self.connection.create_channel().await?;
+        let channel = Arc::new(self.connection.create_channel().await?);
         let callback = channel
             .queue_declare(
                 "",
@@ -85,11 +164,10 @@ impl AmqpBroker {
 
         let replies = Arc::clone(&self.replies);
         tokio::spawn(async move {
-            let _ = channel; // channel needs to be moved here so that it isn't immediately dropped and closed
             while let Some(Ok((_, delivery))) = callback_consumer.next().await {
                 if let Some(correlation_id) = delivery.properties.correlation_id() {
                     if let Some(sender) = replies.lock().await.remove(correlation_id.as_str()) {
-                        let _ = sender.send(delivery);
+                        let _ = sender.send((Arc::downgrade(&channel), delivery).into());
                     }
                 }
             }
@@ -130,7 +208,7 @@ impl AmqpBroker {
         evt: &str,
         payload: Vec<u8>,
         properties: AmqpProperties,
-    ) -> Result<Delivery> {
+    ) -> Result<Message> {
         let call_id = nanoid!();
         let properties = properties
             .with_correlation_id(call_id.as_str().into())
@@ -157,34 +235,13 @@ impl AmqpBroker {
         Ok(rx.await?)
     }
 
-    pub async fn reply_to(&self, msg: &Delivery, payload: Vec<u8>) -> Result<()> {
-        let reply_to = msg
-            .properties
-            .reply_to()
-            .as_ref()
-            .ok_or(Error::Reply("missing reply_to property".into()))?
-            .as_str();
-        let correlation_id = msg
-            .properties
-            .correlation_id()
-            .as_ref()
-            .ok_or(Error::Reply("missing correlation_id property".into()))?;
-        let props = AmqpProperties::default().with_correlation_id(correlation_id.clone());
-
-        self.publisher
-            .basic_publish("", reply_to, Default::default(), payload, props)
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn consume(&self, evt: &str) -> Result<mpsc::UnboundedReceiver<Delivery>> {
+    pub async fn consume(&self, evt: &str) -> Result<mpsc::UnboundedReceiver<Message>> {
         let (tx, rx) = mpsc::unbounded_channel();
         let queue_name = match &self.subgroup {
             Some(g) => format!("{}:{}:{}", self.group, g, evt),
             None => format!("{}:{}", self.group, evt),
         };
-        let channel = self.connection.create_channel().await?;
+        let channel = Arc::new(self.connection.create_channel().await?);
         let queue = channel
             .queue_declare(
                 &queue_name,
@@ -217,11 +274,8 @@ impl AmqpBroker {
         tokio::spawn(async move {
             while let Some(delivery) = consumer.next().await {
                 let (_, delivery) = delivery.expect("Error in consumer");
-                channel
-                    .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
-                    .await
-                    .expect("Failed to acknowledge message.");
-                tx.send(delivery).expect("Failed to send message to stream");
+                tx.send((Arc::downgrade(&channel), delivery).into())
+                    .expect("Failed to send message to stream");
             }
         });
 
@@ -257,8 +311,8 @@ mod test {
             let message = consumer.recv().await.expect("Consumer closed unexpectedly");
 
             println!("Received message: {:?}", message);
-            client
-                .reply_to(&message, "def".as_bytes().to_vec())
+            message
+                .reply("def".as_bytes().to_vec())
                 .await
                 .expect("Unable to send response");
         });

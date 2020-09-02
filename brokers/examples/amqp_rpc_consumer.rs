@@ -15,11 +15,12 @@ async fn main() {
         .await
         .expect("Failed to consume event");
     println!("I'm now listening for messages!");
-    while let Some(payload) = consumer.next().await {
-        let string = std::str::from_utf8(&payload.data).expect("Failed to decode string");
+    while let Some(message) = consumer.next().await {
+        let string = std::str::from_utf8(&message.data).expect("Failed to decode string");
         println!("Message received: {}", string);
-        broker
-            .reply_to(&payload, string.as_bytes().to_vec())
+        message.ack().await.expect("Unable to ack message");
+        message
+            .reply(string.as_bytes().to_vec())
             .await
             .expect("Unable to send reply");
     }
