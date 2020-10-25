@@ -6,7 +6,7 @@ use tokio::stream::StreamExt;
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    let amqp_uri = env::var("AMQP_URI").unwrap_or("amqp://127.0.0.1:5672/%2f".into());
+    let amqp_uri = env::var("AMQP_URI").unwrap_or("amqp://localhost:5672/%2f".into());
     let broker = AmqpBroker::new(&amqp_uri, "foo".to_string(), None)
         .await
         .expect("Failed to initialize broker");
@@ -16,10 +16,12 @@ async fn main() {
         .expect("Failed to consume event");
     println!("I'm now listening for messages!");
     while let Some(message) = consumer.next().await {
-        message.ack().await.expect("Unable to ack message");
         let string = std::str::from_utf8(&message.data).expect("Failed to decode string");
         println!("Message received: {}", string);
+        message.ack().await.expect("Unable to ack message");
+        message
+            .reply(string.as_bytes().to_vec())
+            .await
+            .expect("Unable to send reply");
     }
-
-    println!("Finished consumption");
 }

@@ -14,9 +14,8 @@ edition = "2018"
 lapin = "1.1"
 env_logger = "0.7"
 log = "0.4"
-futures-await-test = "0.3"
-futures = "0.3"
+nanoid = "0.3"
 
 [dependencies.tokio]
 version = "0.2"
-features = ["full"]
+features = ["stream", "macros", "rt-threaded", "sync"]
