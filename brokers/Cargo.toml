@@ -1,6 +1,6 @@
 [package]
 name = "rustacles-brokers"
-version = "0.1.0"
+version = "0.2.0"
 description = "Message brokers which allow for powerful communication between Spectacles services."
 documentation = "https://docs.rs/rustacles-brokers/"
 keywords = ["discord", "spec"]
