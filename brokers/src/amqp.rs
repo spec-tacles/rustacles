@@ -8,10 +8,8 @@ use lapin::{
     ConnectionProperties, ExchangeKind,
 };
 use nanoid::nanoid;
-pub use tokio::{
-    stream::StreamExt,
-    sync::{mpsc, oneshot, Mutex},
-};
+pub use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio_stream::StreamExt;
 
 use crate::errors::*;
 

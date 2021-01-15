@@ -1,7 +1,6 @@
 use std::env;
 
 use rustacles_brokers::amqp::AmqpBroker;
-use tokio::stream::StreamExt;
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +14,7 @@ async fn main() {
         .await
         .expect("Failed to consume event");
     println!("I'm now listening for messages!");
-    while let Some(message) = consumer.next().await {
+    while let Some(message) = consumer.recv().await {
         let string = std::str::from_utf8(&message.data).expect("Failed to decode string");
         println!("Message received: {}", string);
         message.ack().await.expect("Unable to ack message");
