@@ -7,11 +7,12 @@ use lapin::{
     message::Delivery, options::*, types::FieldTable, BasicProperties, Channel, Connection,
     ConnectionProperties, ExchangeKind,
 };
+use log::debug;
 use nanoid::nanoid;
 pub use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_stream::StreamExt;
 
-use crate::errors::*;
+use crate::error::*;
 
 pub type AmqpProperties = BasicProperties;
 
@@ -284,7 +285,7 @@ impl AmqpBroker {
 #[cfg(test)]
 mod test {
     use super::AmqpBroker;
-    use crate::errors::*;
+    use crate::error::*;
     use tokio::{
         spawn,
         time::{timeout, Duration},
