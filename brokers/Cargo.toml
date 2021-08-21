@@ -11,10 +11,15 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lapin = "1.1"
+deadpool-redis = { version = "0.9", optional = true }
+lapin = { version = "1.1", optional = true }
 env_logger = "0.7"
+futures = "0.3"
 log = "0.4"
 nanoid = "0.3"
+redis = { version = "0.21", optional = true, default-features = false, features = ["streams"] }
+rmp-serde = "0.15"
+serde = "1.0"
 thiserror = "1.0"
 tokio-stream = "0.1"
 
@@ -25,3 +30,23 @@ features = ["rt-multi-thread"]
 [dev-dependencies.tokio]
 version = "1.0"
 features = ["rt-multi-thread", "macros"]
+
+[features]
+amqp-broker = ["lapin"]
+redis-broker = ["deadpool-redis", "redis"]
+
+[[example]]
+name = "amqp_consumer"
+required-features = ["amqp-broker"]
+
+[[example]]
+name = "amqp_producer"
+required-features = ["amqp-broker"]
+
+[[example]]
+name = "amqp_rpc_consumer"
+required-features = ["amqp-broker"]
+
+[[example]]
+name = "amqp_rpc_producer"
+required-features = ["amqp-broker"]
