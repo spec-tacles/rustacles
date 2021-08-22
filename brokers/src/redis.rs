@@ -8,7 +8,6 @@ use deadpool_redis::{
     Connection, Pool,
 };
 use futures::{
-    future::ready,
     stream::{iter, select_all},
     StreamExt, TryStream, TryStreamExt,
 };
