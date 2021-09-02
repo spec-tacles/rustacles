@@ -91,12 +91,12 @@ pub struct ConsumeResult<T, U> {
 }
 
 // #[derive(Debug)]
-pub struct RedisBroker {
+pub struct RedisBroker<'a> {
     /// The consumer name of this broker. Should be unique to the container/machine consuming
     /// messages.
-    pub name: String,
+    pub name: Cow<'a, str>,
     /// The consumer group name.
-    pub group: String,
+    pub group: Cow<'a, str>,
     /// The largest chunk to consume from Redis. This is only exposed for tuning purposes and
     /// doesn't affect the public API at all.
     pub max_chunk: usize,
@@ -107,17 +107,18 @@ pub struct RedisBroker {
     read_opts: StreamReadOptions,
 }
 
-impl RedisBroker {
+impl<'a> RedisBroker<'a> {
     /// Creates a new broker with sensible defaults.
-    pub fn new(group: String, pool: Pool) -> RedisBroker {
+    pub fn new(group: impl Into<Cow<'a, str>>, pool: Pool) -> RedisBroker<'a> {
+        let group = group.into();
         let name = nanoid!();
         let read_opts = StreamReadOptions::default()
-            .group(&group, &name)
+            .group(&*group, &name)
             .count(DEFAULT_MAX_CHUNK)
             .block(DEFAULT_BLOCK_INTERVAL);
 
         Self {
-            name,
+            name: Cow::Owned(name),
             group,
             max_chunk: DEFAULT_MAX_CHUNK,
             max_operation_time: DEFAULT_BLOCK_INTERVAL,
@@ -161,7 +162,7 @@ impl RedisBroker {
             let _: Result<Value, RedisError> = self
                 .get()
                 .await?
-                .xgroup_create_mkstream(*event, &self.group, 0)
+                .xgroup_create_mkstream(*event, &*self.group, 0)
                 .await;
         }
 
@@ -173,12 +174,12 @@ impl RedisBroker {
     }
 
     /// Consume events from the broker.
-    pub fn consume<'a, V>(
-        &'a self,
-        events: &'a [&str],
+    pub fn consume<'consume, V>(
+        &'consume self,
+        events: &'consume [&str],
     ) -> ConsumeResult<
-        impl TryStream<Ok = Message<'a, V>, Error = Error>,
-        impl TryStream<Ok = Message<'a, V>, Error = Error>,
+        impl TryStream<Ok = Message<'consume, V>, Error = Error>,
+        impl TryStream<Ok = Message<'consume, V>, Error = Error>,
     >
     where
         V: DeserializeOwned,
@@ -198,7 +199,11 @@ impl RedisBroker {
                         let mut conn = pool.get().await?;
                         let mut cmd = redis::cmd("xautoclaim");
 
-                        cmd.arg(event).arg(group).arg(name).arg(time).arg("0-0");
+                        cmd.arg(event)
+                            .arg(&**group)
+                            .arg(&**name)
+                            .arg(time)
+                            .arg("0-0");
 
                         let res: Vec<Value> = cmd.query_async(conn.deref_mut()).await?;
                         let read = StreamRangeReply::from_redis_value(&res[1])?;
