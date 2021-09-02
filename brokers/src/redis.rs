@@ -1,5 +1,6 @@
 use std::{borrow::Cow, ops::DerefMut};
 
+pub use deadpool_redis;
 use deadpool_redis::{
     redis::{
         streams::{StreamId, StreamRangeReply, StreamReadOptions, StreamReadReply},
