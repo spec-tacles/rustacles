@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::DerefMut};
+use std::borrow::Cow;
 
 pub use deadpool_redis;
 use deadpool_redis::{
@@ -61,7 +61,7 @@ impl<'a, V> Message<'a, V> {
     /// Acknowledge receipt of the message. This should always be called, since un-acked messages
     /// will be reclaimed by other clients.
     pub async fn ack(&self) -> Result<()> {
-        let _: Value = self
+        self
             .pool
             .get()
             .await?
@@ -75,7 +75,7 @@ impl<'a, V> Message<'a, V> {
     pub async fn reply(&self, data: &impl Serialize) -> Result<()> {
         let key = format!("{}:{}", self.event, self.id);
         let serialized = rmp_serde::to_vec(data)?;
-        let _: Value = self.pool.get().await?.publish(key, serialized).await?;
+        self.pool.get().await?.publish(key, serialized).await?;
 
         Ok(())
     }
@@ -132,7 +132,7 @@ impl<'a> RedisBroker<'a> {
     pub async fn publish(&self, event: &str, data: &impl Serialize) -> Result<String> {
         let serialized = rmp_serde::to_vec(data)?;
         Ok(self
-            .get()
+            .get_conn()
             .await?
             .xadd(event, "*", &[(STREAM_DATA_KEY, serialized)])
             .await?)
@@ -145,23 +145,21 @@ impl<'a> RedisBroker<'a> {
         let id = self.publish(event, data).await?;
         let name = format!("{}:{}", event, id);
 
-        let mut conn = Connection::take(self.get().await?).into_pubsub();
+        let mut conn = Connection::take(self.get_conn().await?).into_pubsub();
         conn.subscribe(&name).await?;
 
         let mut stream = conn.on_message();
         Ok(stream
             .next()
             .await
-            .map(|msg| msg.get_payload::<Vec<u8>>())
-            .transpose()?
-            .map(|payload| rmp_serde::from_read_ref(&payload))
+            .map(|msg| rmp_serde::from_read_ref(msg.get_payload_bytes()))
             .transpose()?)
     }
 
     pub async fn subscribe(&self, events: &[&str]) -> Result<()> {
         for event in events {
             let _: Result<Value, RedisError> = self
-                .get()
+                .get_conn()
                 .await?
                 .xgroup_create_mkstream(*event, &*self.group, 0)
                 .await;
@@ -170,7 +168,7 @@ impl<'a> RedisBroker<'a> {
         Ok(())
     }
 
-    async fn get(&self) -> Result<Connection> {
+    async fn get_conn(&self) -> Result<Connection> {
         Ok(self.pool.get().await?)
     }
 
@@ -194,6 +192,7 @@ impl<'a> RedisBroker<'a> {
 
         let autoclaim_futs = events
             .iter()
+            .copied()
             .map(|event| {
                 move || async move {
                     let messages = async move {
@@ -206,7 +205,7 @@ impl<'a> RedisBroker<'a> {
                             .arg(time)
                             .arg("0-0");
 
-                        let res: Vec<Value> = cmd.query_async(conn.deref_mut()).await?;
+                        let res: Vec<Value> = cmd.query_async(&mut conn).await?;
                         let read = StreamRangeReply::from_redis_value(&res[1])?;
 
                         let messages = read.ids.into_iter().map(move |id| {
@@ -237,7 +236,6 @@ impl<'a> RedisBroker<'a> {
                         let read: Option<StreamReadReply> =
                             pool.get().await?.xread_options(&events, &ids, opts).await?;
 
-                        dbg!(&read);
                         let messages = read.map(|reply| reply.keys).into_iter().flatten().flat_map(
                             move |event| {
                                 let key = Cow::from(event.key);
@@ -270,7 +268,7 @@ mod test {
 
     #[tokio::test]
     async fn consumes_messages() {
-        let group = "foo".to_string();
+        let group = "foo";
         let manager = Manager::new("redis://localhost:6379").expect("create manager");
         let pool = Pool::new(manager, 32);
         let broker = RedisBroker::new(group, pool);
