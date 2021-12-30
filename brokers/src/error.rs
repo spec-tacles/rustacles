@@ -2,9 +2,10 @@
 use deadpool_redis::{redis::RedisError, PoolError};
 #[cfg(feature = "amqp-broker")]
 use lapin::Error as LapinError;
+#[cfg(feature = "amqp-broker")]
+use tokio::sync::oneshot::error::RecvError;
 use std::{io::Error as IoError, result::Result as StdResult};
 use thiserror::Error;
-use tokio::{sync::oneshot::error::RecvError, task::JoinError};
 
 pub type Result<T, E = Error> = StdResult<T, E>;
 
@@ -15,6 +16,7 @@ pub enum Error {
     Lapin(#[from] LapinError),
     #[error("IO error")]
     Io(#[from] IoError),
+    #[cfg(feature = "amqp-broker")]
     #[error("Async receive error")]
     Recv(#[from] RecvError),
     #[error("Reply error")]
@@ -25,8 +27,6 @@ pub enum Error {
     #[cfg(feature = "redis-broker")]
     #[error("Pool error")]
     Deadpool(#[from] PoolError),
-    #[error("Join error")]
-    Join(#[from] JoinError),
     #[error("MessagePack encode error")]
     MsgpackEncode(#[from] rmp_serde::encode::Error),
     #[error("MessagePack decode error")]

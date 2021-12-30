@@ -1703,7 +1703,6 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio 1.15.0",
- "tokio-stream",
 ]
 
 [[package]]
@@ -2079,17 +2078,6 @@ checksum = "cd608593a919a8e05a7d1fc6df885e40f6a88d3a70a3a7eff23ff27964eda069"
 dependencies = [
  "native-tls",
  "tokio 0.2.25",
-]
-
-[[package]]
-name = "tokio-stream"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50145484efff8818b5ccd256697f36863f587da82cf8b409c53adf1e840798e3"
-dependencies = [
- "futures-core",
- "pin-project-lite 0.2.7",
- "tokio 1.15.0",
 ]
 
 [[package]]

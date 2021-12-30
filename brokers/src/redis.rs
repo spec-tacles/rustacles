@@ -10,7 +10,7 @@ use deadpool_redis::{
 };
 use futures::{
     stream::{iter, select_all},
-    StreamExt, TryStream, TryStreamExt,
+    stream_select, StreamExt, TryStream, TryStreamExt,
 };
 use nanoid::nanoid;
 use serde::{de::DeserializeOwned, Serialize};
@@ -61,8 +61,7 @@ impl<'a, V> Message<'a, V> {
     /// Acknowledge receipt of the message. This should always be called, since un-acked messages
     /// will be reclaimed by other clients.
     pub async fn ack(&self) -> Result<()> {
-        self
-            .pool
+        self.pool
             .get()
             .await?
             .xack(&*self.event, self.group, &[&self.id])
@@ -79,16 +78,6 @@ impl<'a, V> Message<'a, V> {
 
         Ok(())
     }
-}
-
-/// The result of consuming events.
-#[derive(Debug, Clone)]
-pub struct ConsumeResult<T, U> {
-    /// A stream that, when polled, claims messages from other clients that have failed to ack
-    /// within the configured time period.
-    pub autoclaim: T,
-    /// A stream that, when polled, consumes messages from the group for this client.
-    pub claim: U,
 }
 
 // #[derive(Debug)]
@@ -176,10 +165,7 @@ impl<'a> RedisBroker<'a> {
     pub fn consume<'consume, V>(
         &'consume self,
         events: &'consume [&str],
-    ) -> ConsumeResult<
-        impl TryStream<Ok = Message<'consume, V>, Error = Error>,
-        impl TryStream<Ok = Message<'consume, V>, Error = Error>,
-    >
+    ) -> impl TryStream<Ok = Message<'consume, V>, Error = Error>
     where
         V: DeserializeOwned,
     {
@@ -255,7 +241,7 @@ impl<'a> RedisBroker<'a> {
         let autoclaim = select_all(autoclaim_futs);
         let claim = repeat_fn(claim_fut).try_flatten();
 
-        ConsumeResult { autoclaim, claim }
+        stream_select!(autoclaim, claim)
     }
 }
 
@@ -283,7 +269,6 @@ mod test {
 
         let mut consumer = broker.consume::<Vec<u8>>(&events);
         let msg = consumer
-            .claim
             .try_next()
             .await
             .expect("message")
