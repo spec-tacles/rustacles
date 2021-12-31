@@ -158,10 +158,11 @@ impl<'a> RedisBroker<'a> {
         self.pubsub.subscribe(name.clone()).await?;
 
         let data = BroadcastStream::new(self.pubsub_msgs.subscribe())
+            .err_into::<Error>()
             .try_filter_map(|msg| async move {
                 match &*msg {
                     redis_subscribe::Message::Message { message, .. } => {
-                        Ok(rmp_serde::from_read(message.as_bytes()).ok())
+                        Ok(rmp_serde::from_read(message.as_bytes())?)
                     }
                     _ => Ok(None),
                 }
