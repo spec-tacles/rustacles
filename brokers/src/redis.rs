@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 pub use deadpool_redis;
 use deadpool_redis::{
@@ -13,7 +13,10 @@ use futures::{
     stream_select, StreamExt, TryStream, TryStreamExt,
 };
 use nanoid::nanoid;
+use redis_subscribe::RedisSub;
 use serde::{de::DeserializeOwned, Serialize};
+use tokio::{spawn, sync::broadcast};
+use tokio_stream::wrappers::BroadcastStream;
 
 use crate::{
     error::{Error, Result},
@@ -80,6 +83,8 @@ impl<'a, V> Message<'a, V> {
     }
 }
 
+pub struct Rpc;
+
 // #[derive(Debug)]
 pub struct RedisBroker<'a> {
     /// The consumer name of this broker. Should be unique to the container/machine consuming
@@ -94,12 +99,14 @@ pub struct RedisBroker<'a> {
     /// time period will be reclaimed by other clients.
     pub max_operation_time: usize,
     pool: Pool,
+    pubsub: Arc<RedisSub>,
+    pubsub_msgs: broadcast::Sender<Arc<redis_subscribe::Message>>,
     read_opts: StreamReadOptions,
 }
 
 impl<'a> RedisBroker<'a> {
     /// Creates a new broker with sensible defaults.
-    pub fn new(group: impl Into<Cow<'a, str>>, pool: Pool) -> RedisBroker<'a> {
+    pub fn new(group: impl Into<Cow<'a, str>>, pool: Pool, address: &str) -> RedisBroker<'a> {
         let group = group.into();
         let name = nanoid!();
         let read_opts = StreamReadOptions::default()
@@ -107,12 +114,26 @@ impl<'a> RedisBroker<'a> {
             .count(DEFAULT_MAX_CHUNK)
             .block(DEFAULT_BLOCK_INTERVAL);
 
+        let pubsub = Arc::new(RedisSub::new(&address));
+
+        let (tx, _) = broadcast::channel(1);
+        let task_pubsub = Arc::clone(&pubsub);
+        let task_tx = tx.clone();
+        spawn(async move {
+            let mut stream = task_pubsub.listen().await.unwrap();
+            while let Some(msg) = stream.next().await {
+                task_tx.send(Arc::new(msg)).unwrap();
+            }
+        });
+
         Self {
             name: Cow::Owned(name),
             group,
             max_chunk: DEFAULT_MAX_CHUNK,
             max_operation_time: DEFAULT_BLOCK_INTERVAL,
             pool,
+            pubsub,
+            pubsub_msgs: tx,
             read_opts,
         }
     }
@@ -134,15 +155,24 @@ impl<'a> RedisBroker<'a> {
         let id = self.publish(event, data).await?;
         let name = format!("{}:{}", event, id);
 
-        let mut conn = Connection::take(self.get_conn().await?).into_pubsub();
-        conn.subscribe(&name).await?;
+        self.pubsub.subscribe(name.clone()).await?;
 
-        let mut stream = conn.on_message();
-        Ok(stream
+        let data = BroadcastStream::new(self.pubsub_msgs.subscribe())
+            .try_filter_map(|msg| async move {
+                match &*msg {
+                    redis_subscribe::Message::Message { message, .. } => {
+                        Ok(rmp_serde::from_read(message.as_bytes()).ok())
+                    }
+                    _ => Ok(None),
+                }
+            })
+            .boxed()
             .next()
             .await
-            .map(|msg| rmp_serde::from_read_ref(msg.get_payload_bytes()))
-            .transpose()?)
+            .transpose()?;
+
+        self.pubsub.unsubscribe(name).await?;
+        Ok(data)
     }
 
     pub async fn subscribe(&self, events: &[&str]) -> Result<()> {
@@ -257,7 +287,7 @@ mod test {
         let group = "foo";
         let manager = Manager::new("redis://localhost:6379").expect("create manager");
         let pool = Pool::new(manager, 32);
-        let broker = RedisBroker::new(group, pool);
+        let broker = RedisBroker::new(group, pool, "redis://localhost:6379");
 
         let events = ["abc"];
 
