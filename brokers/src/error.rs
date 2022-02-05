@@ -2,11 +2,11 @@
 use deadpool_redis::{redis::RedisError, PoolError};
 #[cfg(feature = "amqp-broker")]
 use lapin::Error as LapinError;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use std::{io::Error as IoError, result::Result as StdResult};
 use thiserror::Error;
 #[cfg(feature = "amqp-broker")]
 use tokio::sync::oneshot::error::RecvError;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 pub type Result<T, E = Error> = StdResult<T, E>;
 

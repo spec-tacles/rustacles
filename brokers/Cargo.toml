@@ -17,6 +17,7 @@ env_logger = "0.7"
 futures = "0.3"
 log = "0.4"
 nanoid = "0.3"
+pin-project = "1.0"
 redis = { version = "0.21", optional = true, default-features = false, features = ["streams"] }
 redis-subscribe = { git = "https://github.com/appellation/redis-subscribe", branch = "feat/impl-error", optional = true }
 rmp-serde = "0.15"
@@ -27,13 +28,14 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 [dependencies.tokio]
 version = "1.0"
 features = ["rt-multi-thread"]
+optional = true
 
 [dev-dependencies.tokio]
 version = "1.0"
 features = ["rt-multi-thread", "macros"]
 
 [features]
-amqp-broker = ["lapin"]
+amqp-broker = ["lapin", "tokio"]
 redis-broker = ["deadpool-redis", "redis", "redis-subscribe"]
 
 [[example]]

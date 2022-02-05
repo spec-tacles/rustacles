@@ -1733,6 +1733,7 @@ dependencies = [
  "lapin",
  "log",
  "nanoid",
+ "pin-project 1.0.8",
  "redis",
  "redis-subscribe",
  "rmp-serde",
