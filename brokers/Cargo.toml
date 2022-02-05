@@ -23,19 +23,15 @@ redis-subscribe = { git = "https://github.com/appellation/redis-subscribe", bran
 rmp-serde = "0.15"
 serde = "1.0"
 thiserror = "1.0"
+tokio = "1.0"
 tokio-stream = { version = "0.1", features = ["sync"] }
-
-[dependencies.tokio]
-version = "1.0"
-features = ["rt-multi-thread"]
-optional = true
 
 [dev-dependencies.tokio]
 version = "1.0"
 features = ["rt-multi-thread", "macros"]
 
 [features]
-amqp-broker = ["lapin", "tokio"]
+amqp-broker = ["lapin"]
 redis-broker = ["deadpool-redis", "redis", "redis-subscribe"]
 
 [[example]]
