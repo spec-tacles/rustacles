@@ -9,7 +9,7 @@ use super::RedisBroker;
 #[derive(Debug, Clone)]
 pub struct Rpc<'broker> {
     pub(crate) name: String,
-    pub(crate) broker: &'broker RedisBroker<'broker>,
+    pub(crate) broker: &'broker RedisBroker,
 }
 
 impl<'broker> PartialEq for Rpc<'broker> {

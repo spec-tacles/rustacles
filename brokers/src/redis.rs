@@ -1,9 +1,9 @@
 use std::{
-    borrow::Cow,
     fmt::{self, Debug},
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use arcstr::ArcStr;
 pub use deadpool_redis;
 use deadpool_redis::{
     redis::{
@@ -36,12 +36,12 @@ const STREAM_DATA_KEY: &'static str = "data";
 const STREAM_TIMEOUT_KEY: &'static str = "timeout_at";
 
 /// RedisBroker is internally reference counted and can be safely cloned.
-pub struct RedisBroker<'a> {
+pub struct RedisBroker {
     /// The consumer name of this broker. Should be unique to the container/machine consuming
     /// messages.
-    pub name: Cow<'a, str>,
+    pub name: ArcStr,
     /// The consumer group name.
-    pub group: Cow<'a, str>,
+    pub group: ArcStr,
     /// The largest chunk to consume from Redis. This is only exposed for tuning purposes and
     /// doesn't affect the public API at all.
     pub max_chunk: usize,
@@ -53,7 +53,7 @@ pub struct RedisBroker<'a> {
     read_opts: StreamReadOptions,
 }
 
-impl<'a> Clone for RedisBroker<'a> {
+impl Clone for RedisBroker {
     fn clone(&self) -> Self {
         Self {
             name: self.name.clone(),
@@ -67,7 +67,7 @@ impl<'a> Clone for RedisBroker<'a> {
     }
 }
 
-impl<'a> Debug for RedisBroker<'a> {
+impl Debug for RedisBroker {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RedisBroker")
             .field("name", &self.name)
@@ -80,7 +80,7 @@ impl<'a> Debug for RedisBroker<'a> {
     }
 }
 
-impl<'a> RedisBroker<'a> {
+impl RedisBroker {
     fn make_read_opts(group: &str, name: &str) -> StreamReadOptions {
         StreamReadOptions::default()
             .group(group, name)
@@ -89,7 +89,7 @@ impl<'a> RedisBroker<'a> {
     }
 
     /// Creates a new broker with sensible defaults.
-    pub fn new(group: impl Into<Cow<'a, str>>, pool: Pool, address: &str) -> RedisBroker<'a> {
+    pub fn new(group: impl Into<ArcStr>, pool: Pool, address: &str) -> RedisBroker {
         let group = group.into();
         let name = nanoid!();
         let read_opts = RedisBroker::make_read_opts(&*group, &name);
@@ -97,7 +97,7 @@ impl<'a> RedisBroker<'a> {
         let pubsub = BroadcastSub::new(address);
 
         Self {
-            name: Cow::Owned(name),
+            name: name.into(),
             group,
             max_chunk: DEFAULT_MAX_CHUNK,
             max_operation_time: DEFAULT_BLOCK_INTERVAL,
@@ -175,56 +175,68 @@ impl<'a> RedisBroker<'a> {
     pub fn consume<'consume, V>(
         &'consume self,
         events: &'consume [&str],
-    ) -> impl TryStream<Ok = Message<'consume, V>, Error = Error>
+    ) -> impl TryStream<Ok = Message<V>, Error = Error> + 'consume
     where
         V: DeserializeOwned,
     {
         let ids = vec![">"; events.len()];
 
         let pool = &self.pool;
-        let group = &self.group;
-        let name = &self.name;
+        let group = self.group.clone();
+        let name = self.name.clone();
         let time = self.max_operation_time;
 
         let autoclaim_futs = events
             .iter()
             .copied()
             .map(|event| {
-                move || async move {
-                    let messages = async move {
-                        let mut conn = pool.get().await?;
-                        let mut cmd = redis::cmd("xautoclaim");
+                let event = ArcStr::from(event);
+                let group = group.clone();
+                let name = name.clone();
 
-                        cmd.arg(event)
-                            .arg(&**group)
-                            .arg(&**name)
-                            .arg(time)
-                            .arg("0-0");
+                move || {
+                    let event = event.clone();
+                    let group = group.clone();
+                    let name = name.clone();
 
-                        let res: Vec<Value> = cmd.query_async(&mut conn).await?;
-                        let read = StreamRangeReply::from_redis_value(&res[1])?;
+                    async move {
+                        let messages = async move {
+                            let mut conn = pool.get().await?;
+                            let mut cmd = redis::cmd("xautoclaim");
 
-                        let messages = read.ids.into_iter().map(move |id| {
-                            Ok::<_, Error>(Message::<V>::new(
-                                id,
-                                &group,
-                                Cow::Borrowed(event),
-                                self,
-                            ))
-                        });
+                            cmd.arg(&*event)
+                                .arg(&*group)
+                                .arg(&*name)
+                                .arg(time)
+                                .arg("0-0");
 
-                        Ok::<_, Error>(iter(messages))
-                    };
+                            let res: Vec<Value> = cmd.query_async(&mut conn).await?;
+                            let read = StreamRangeReply::from_redis_value(&res[1])?;
 
-                    Some(messages.await)
+                            let messages = read.ids.into_iter().map(move |id| {
+                                Ok::<_, Error>(Message::<V>::new(
+                                    id,
+                                    group.clone(),
+                                    event.clone(),
+                                    self.clone(),
+                                ))
+                            });
+
+                            Ok::<_, Error>(iter(messages))
+                        };
+
+                        Some(messages.await)
+                    }
                 }
             })
             .map(repeat_fn)
             .map(|iter| iter.try_flatten());
 
+        let group = group.clone();
         let claim_fut = move || {
             let opts = &self.read_opts;
             let ids = ids.clone();
+            let group = group.clone();
 
             async move {
                 let messages =
@@ -234,9 +246,15 @@ impl<'a> RedisBroker<'a> {
 
                         let messages = read.map(|reply| reply.keys).into_iter().flatten().flat_map(
                             move |event| {
-                                let key = Cow::from(event.key);
+                                let group = group.clone();
+                                let key = ArcStr::from(event.key);
                                 event.ids.into_iter().map(move |id| {
-                                    Ok(Message::<V>::new(id, group, key.clone(), self))
+                                    Ok(Message::<V>::new(
+                                        id,
+                                        group.clone(),
+                                        key.clone(),
+                                        self.clone(),
+                                    ))
                                 })
                             },
                         );
