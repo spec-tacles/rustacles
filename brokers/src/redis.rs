@@ -17,6 +17,7 @@ use futures::{
     stream_select, TryStream, TryStreamExt,
 };
 use nanoid::nanoid;
+use redis::ToRedisArgs;
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
@@ -172,11 +173,12 @@ impl RedisBroker {
     }
 
     /// Consume events from the broker.
-    pub fn consume<'consume, V>(
+    pub fn consume<'consume, E, V>(
         &'consume self,
-        events: &'consume [&str],
+        events: &'consume [E],
     ) -> impl TryStream<Ok = Message<V>, Error = Error> + 'consume
     where
+        E: Into<Arc<str>> + Clone + ToRedisArgs + Send + Sync,
         V: DeserializeOwned,
     {
         let ids = vec![">"; events.len()];
@@ -188,9 +190,9 @@ impl RedisBroker {
 
         let autoclaim_futs = events
             .iter()
-            .copied()
+            .cloned()
             .map(|event| {
-                let event = Arc::<str>::from(event);
+                let event = event.into();
                 let group = group.clone();
                 let name = name.clone();
 
@@ -299,7 +301,7 @@ mod test {
             .await
             .expect("published");
 
-        let mut consumer = broker.consume::<Vec<u8>>(&events);
+        let mut consumer = broker.consume::<_, Vec<u8>>(&events);
         let msg = consumer
             .try_next()
             .await
@@ -337,7 +339,7 @@ mod test {
         });
 
         let consume_fut = spawn(async move {
-            let mut consumer = broker1.consume::<Vec<u8>>(&events);
+            let mut consumer = broker1.consume::<_, Vec<u8>>(&events);
             let msg = consumer
                 .try_next()
                 .await
