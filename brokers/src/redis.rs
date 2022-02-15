@@ -1,9 +1,9 @@
 use std::{
     fmt::{self, Debug},
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use arcstr::ArcStr;
 pub use deadpool_redis;
 use deadpool_redis::{
     redis::{
@@ -39,9 +39,9 @@ const STREAM_TIMEOUT_KEY: &'static str = "timeout_at";
 pub struct RedisBroker {
     /// The consumer name of this broker. Should be unique to the container/machine consuming
     /// messages.
-    pub name: ArcStr,
+    pub name: Arc<str>,
     /// The consumer group name.
-    pub group: ArcStr,
+    pub group: Arc<str>,
     /// The largest chunk to consume from Redis. This is only exposed for tuning purposes and
     /// doesn't affect the public API at all.
     pub max_chunk: usize,
@@ -89,7 +89,7 @@ impl RedisBroker {
     }
 
     /// Creates a new broker with sensible defaults.
-    pub fn new(group: impl Into<ArcStr>, pool: Pool, address: &str) -> RedisBroker {
+    pub fn new(group: impl Into<Arc<str>>, pool: Pool, address: &str) -> RedisBroker {
         let group = group.into();
         let name = nanoid!();
         let read_opts = RedisBroker::make_read_opts(&*group, &name);
@@ -190,7 +190,7 @@ impl RedisBroker {
             .iter()
             .copied()
             .map(|event| {
-                let event = ArcStr::from(event);
+                let event = Arc::<str>::from(event);
                 let group = group.clone();
                 let name = name.clone();
 
@@ -247,7 +247,7 @@ impl RedisBroker {
                         let messages = read.map(|reply| reply.keys).into_iter().flatten().flat_map(
                             move |event| {
                                 let group = group.clone();
-                                let key = ArcStr::from(event.key);
+                                let key = Arc::<str>::from(event.key);
                                 event.ids.into_iter().map(move |id| {
                                     Ok(Message::<V>::new(
                                         id,
