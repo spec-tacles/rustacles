@@ -1,23 +1,23 @@
 use std::{
-    fmt::{self, Debug},
-    sync::Arc,
+    borrow::Cow,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub use deadpool_redis;
-use deadpool_redis::{
-    redis::{
-        streams::{StreamRangeReply, StreamReadOptions, StreamReadReply},
-        AsyncCommands, FromRedisValue, RedisError, Value,
-    },
-    Connection, Pool,
-};
+use bytes::Bytes;
 use futures::{
-    stream::{iter, select_all},
-    stream_select, TryStream, TryStreamExt,
+    stream::{iter, select, select_all},
+    StreamExt, TryStream, TryStreamExt,
 };
 use nanoid::nanoid;
-use redis::ToRedisArgs;
+use redust::{
+    model::stream::{
+        claim::AutoclaimResponse,
+        read::{Field, ReadResponse},
+        Id,
+    },
+    pool::Pool,
+    resp::from_data,
+};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
@@ -25,92 +25,56 @@ use crate::{
     util::stream::repeat_fn,
 };
 
-use self::{message::Message, pubsub::BroadcastSub, rpc::Rpc};
+use self::{message::Message, rpc::Rpc};
 
 pub mod message;
-pub mod pubsub;
 pub mod rpc;
 
-const DEFAULT_MAX_CHUNK: usize = 10;
-const DEFAULT_BLOCK_INTERVAL: usize = 5000;
-const STREAM_DATA_KEY: &'static str = "data";
-const STREAM_TIMEOUT_KEY: &'static str = "timeout_at";
+const DEFAULT_MAX_CHUNK: &[u8] = b"10";
+const DEFAULT_BLOCK_INTERVAL: &[u8] = b"5000";
+const STREAM_DATA_KEY: Field<'static> = Field(Cow::Borrowed(b"data"));
+const STREAM_TIMEOUT_KEY: Field<'static> = Field(Cow::Borrowed(b"timeout_at"));
 
 /// RedisBroker is internally reference counted and can be safely cloned.
+#[derive(Debug, Clone)]
 pub struct RedisBroker {
     /// The consumer name of this broker. Should be unique to the container/machine consuming
     /// messages.
-    pub name: Arc<str>,
+    pub name: Bytes,
     /// The consumer group name.
-    pub group: Arc<str>,
-    /// The largest chunk to consume from Redis. This is only exposed for tuning purposes and
-    /// doesn't affect the public API at all.
-    pub max_chunk: usize,
-    /// The maximum time that a broker is assumed to be alive (ms). Messages pending after this
-    /// time period will be reclaimed by other clients.
-    pub max_operation_time: usize,
+    pub group: Bytes,
     pool: Pool,
-    pubsub: BroadcastSub,
-    read_opts: StreamReadOptions,
-}
-
-impl Clone for RedisBroker {
-    fn clone(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            group: self.group.clone(),
-            max_chunk: self.max_chunk,
-            max_operation_time: self.max_operation_time,
-            pool: self.pool.clone(),
-            pubsub: self.pubsub.clone(),
-            read_opts: Self::make_read_opts(&*self.group, &*self.name),
-        }
-    }
-}
-
-impl Debug for RedisBroker {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RedisBroker")
-            .field("name", &self.name)
-            .field("group", &self.group)
-            .field("max_chunk", &self.max_chunk)
-            .field("max_operation_time", &self.max_operation_time)
-            .field("pubsub", &self.pubsub)
-            .field("read_opts", &self.read_opts)
-            .finish_non_exhaustive()
-    }
 }
 
 impl RedisBroker {
-    fn make_read_opts(group: &str, name: &str) -> StreamReadOptions {
-        StreamReadOptions::default()
-            .group(group, name)
-            .count(DEFAULT_MAX_CHUNK)
-            .block(DEFAULT_BLOCK_INTERVAL)
-    }
-
     /// Creates a new broker with sensible defaults.
-    pub fn new(group: impl Into<Arc<str>>, pool: Pool, address: &str) -> RedisBroker {
+    pub fn new(group: impl Into<Bytes>, pool: Pool) -> Self {
         let group = group.into();
         let name = nanoid!();
-        let read_opts = RedisBroker::make_read_opts(&*group, &name);
-
-        let pubsub = BroadcastSub::new(address);
 
         Self {
             name: name.into(),
             group,
-            max_chunk: DEFAULT_MAX_CHUNK,
-            max_operation_time: DEFAULT_BLOCK_INTERVAL,
             pool,
-            pubsub,
-            read_opts,
         }
     }
 
     /// Publishes an event to the broker. Returned value is the ID of the message.
-    pub async fn publish(&self, event: &str, data: &impl Serialize) -> Result<String> {
-        self.publish_timeout(event, data, None).await
+    pub async fn publish(&self, event: impl AsRef<[u8]>, data: &impl Serialize) -> Result<Id> {
+        let serialized_data = rmp_serde::to_vec(data)?;
+        let mut conn = self.pool.get().await?;
+
+        let data = conn
+            .cmd([
+                b"xadd",
+                event.as_ref(),
+                b"*",
+                &STREAM_DATA_KEY.0,
+                &serialized_data,
+            ])
+            .await?;
+
+        Ok(from_data(data)?)
     }
 
     pub async fn call(
@@ -118,160 +82,194 @@ impl RedisBroker {
         event: &str,
         data: &impl Serialize,
         timeout: Option<SystemTime>,
-    ) -> Result<Rpc<'_>> {
-        let id = self.publish_timeout(event, data, timeout).await?;
+    ) -> Result<Rpc> {
+        let id = if let Some(timeout) = timeout {
+            self.publish_timeout(event, data, timeout).await?
+        } else {
+            self.publish(event, data).await?
+        };
+
         let name = format!("{}:{}", event, id);
 
         Ok(Rpc {
             name,
-            broker: &self,
+            broker: self.clone(),
         })
     }
 
-    async fn publish_timeout(
+    pub async fn publish_timeout(
         &self,
-        event: &str,
+        event: impl AsRef<[u8]>,
         data: &impl Serialize,
-        maybe_timeout: Option<SystemTime>,
-    ) -> Result<String> {
+        timeout: SystemTime,
+    ) -> Result<Id> {
         let serialized_data = rmp_serde::to_vec(data)?;
-        let mut conn = self.get_conn().await?;
+        let mut conn = self.pool.get().await?;
 
-        let args = match maybe_timeout {
-            Some(timeout) => vec![
-                (STREAM_DATA_KEY, serialized_data),
-                (
-                    STREAM_TIMEOUT_KEY,
-                    timeout
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos()
-                        .to_string()
-                        .into_bytes(),
-                ),
-            ],
-            None => vec![(STREAM_DATA_KEY, serialized_data)],
-        };
+        let timeout_bytes = timeout
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .to_string()
+            .into_bytes();
 
-        Ok(conn.xadd(event, "*", &args).await?)
+        let data = conn
+            .cmd([
+                b"xadd",
+                event.as_ref(),
+                b"*",
+                &STREAM_DATA_KEY.0,
+                &serialized_data,
+                &STREAM_TIMEOUT_KEY.0,
+                &timeout_bytes,
+            ])
+            .await?;
+
+        Ok(from_data(data)?)
     }
 
-    pub async fn subscribe(&self, events: &[&str]) -> Result<()> {
+    pub async fn subscribe(&self, events: impl Iterator<Item = &Bytes>) -> Result<()> {
+        let mut conn = self.pool.get().await?;
+
         for event in events {
-            let _: Result<Value, RedisError> = self
-                .get_conn()
-                .await?
-                .xgroup_create_mkstream(*event, &*self.group, 0)
-                .await;
+            let cmd: &[&[u8]] = &[
+                b"xgroup",
+                b"create",
+                &*event,
+                &*self.group,
+                b"$",
+                b"mkstream",
+            ];
+
+            match conn.cmd(cmd).await {
+                Ok(_) => (),
+                Err(redust::Error::Redis(err)) if err.starts_with("BUSYGROUP") => (),
+                Err(e) => return Err(e.into()),
+            }
         }
 
         Ok(())
     }
 
-    async fn get_conn(&self) -> Result<Connection> {
-        Ok(self.pool.get().await?)
+    /// Consume events from the broker.
+    pub fn consume<V>(&self, events: Vec<Bytes>) -> impl TryStream<Ok = Message<V>, Error = Error>
+    where
+        V: DeserializeOwned + 'static,
+    {
+        let autoclaim = self
+            .autoclaim_all::<V>(events.clone())
+            .into_stream()
+            .boxed();
+        let claim = self.claim::<V>(events).into_stream().boxed();
+
+        select(autoclaim, claim)
     }
 
-    /// Consume events from the broker.
-    pub fn consume<'consume, E, V>(
-        &'consume self,
-        events: &'consume [E],
-    ) -> impl TryStream<Ok = Message<V>, Error = Error> + 'consume
+    fn claim<V>(&self, events: Vec<Bytes>) -> impl TryStream<Ok = Message<V>, Error = Error>
     where
-        E: Into<Arc<str>> + Clone + ToRedisArgs + Send + Sync,
         V: DeserializeOwned,
     {
-        let ids = vec![">"; events.len()];
+        let this = self.clone();
+        let fut_fn = move || {
+            let this = this.clone();
+            let events = events.clone();
 
-        let pool = &self.pool;
-        let group = self.group.clone();
-        let name = self.name.clone();
-        let time = self.max_operation_time;
+            async move { Some(this.get_messages(&events).await) }
+        };
 
-        let autoclaim_futs = events
-            .iter()
-            .cloned()
+        repeat_fn(fut_fn).try_flatten()
+    }
+
+    async fn get_messages<V>(
+        &self,
+        events: &[Bytes],
+    ) -> Result<impl TryStream<Ok = Message<V>, Error = Error>>
+    where
+        V: DeserializeOwned,
+    {
+        let this = self.clone();
+        let read = self.xreadgroup(events).await?;
+
+        let messages = read.0.into_iter().flat_map(move |(event, entries)| {
+            let this = this.clone();
+            entries.0.into_iter().map(move |(id, entry)| {
+                Ok(Message::<V>::new(
+                    id,
+                    entry,
+                    Bytes::copy_from_slice(&event.0),
+                    this.clone(),
+                ))
+            })
+        });
+
+        Ok::<_, Error>(iter(messages))
+    }
+
+    async fn xreadgroup(&self, events: &[Bytes]) -> Result<ReadResponse<'static>, Error> {
+        let ids = vec![&b">"[..]; events.len()];
+        let mut cmd: Vec<&[u8]> = vec![
+            b"xreadgroup",
+            b"group",
+            &*self.group,
+            &*self.name,
+            b"count",
+            DEFAULT_MAX_CHUNK,
+            b"block",
+            DEFAULT_BLOCK_INTERVAL,
+            b"streams",
+        ];
+        cmd.extend(events.iter().map(|b| &b[..]));
+        cmd.extend_from_slice(&ids);
+
+        let data = self.pool.get().await?.cmd(cmd).await?;
+        Ok(from_data(data)?)
+    }
+
+    async fn xautoclaim(&self, event: &[u8]) -> Result<AutoclaimResponse<'static>, Error> {
+        let cmd = [
+            b"xautoclaim",
+            event,
+            &*self.group,
+            &*self.name,
+            DEFAULT_BLOCK_INTERVAL,
+            b"0-0",
+        ];
+
+        let mut conn = self.pool.get().await?;
+
+        let res = conn.cmd(cmd).await?;
+        Ok(from_data(res)?)
+    }
+
+    fn autoclaim_all<V>(&self, events: Vec<Bytes>) -> impl TryStream<Ok = Message<V>, Error = Error>
+    where
+        V: DeserializeOwned,
+    {
+        let futs = events
+            .into_iter()
             .map(|event| {
-                let event = event.into();
-                let group = group.clone();
-                let name = name.clone();
-
+                let this = self.clone();
                 move || {
+                    let this = this.clone();
                     let event = event.clone();
-                    let group = group.clone();
-                    let name = name.clone();
 
-                    async move {
-                        let messages = async move {
-                            let mut conn = pool.get().await?;
-                            let mut cmd = redis::cmd("xautoclaim");
+                    let messages = async move {
+                        let read = this.xautoclaim(&event).await?;
 
-                            cmd.arg(&*event)
-                                .arg(&*group)
-                                .arg(&*name)
-                                .arg(time)
-                                .arg("0-0");
+                        let messages = read.1 .0.into_iter().map(move |(id, data)| {
+                            Ok::<_, Error>(Message::<V>::new(id, data, event.clone(), this.clone()))
+                        });
 
-                            let res: Vec<Value> = cmd.query_async(&mut conn).await?;
-                            let read = StreamRangeReply::from_redis_value(&res[1])?;
+                        Ok::<_, Error>(iter(messages))
+                    };
 
-                            let messages = read.ids.into_iter().map(move |id| {
-                                Ok::<_, Error>(Message::<V>::new(
-                                    id,
-                                    group.clone(),
-                                    event.clone(),
-                                    self.clone(),
-                                ))
-                            });
-
-                            Ok::<_, Error>(iter(messages))
-                        };
-
-                        Some(messages.await)
-                    }
+                    async move { Some(messages.await) }
                 }
             })
             .map(repeat_fn)
             .map(|iter| iter.try_flatten());
 
-        let group = group.clone();
-        let claim_fut = move || {
-            let opts = &self.read_opts;
-            let ids = ids.clone();
-            let group = group.clone();
-
-            async move {
-                let messages =
-                    async move {
-                        let read: Option<StreamReadReply> =
-                            pool.get().await?.xread_options(&events, &ids, opts).await?;
-
-                        let messages = read.map(|reply| reply.keys).into_iter().flatten().flat_map(
-                            move |event| {
-                                let group = group.clone();
-                                let key = Arc::<str>::from(event.key);
-                                event.ids.into_iter().map(move |id| {
-                                    Ok(Message::<V>::new(
-                                        id,
-                                        group.clone(),
-                                        key.clone(),
-                                        self.clone(),
-                                    ))
-                                })
-                            },
-                        );
-
-                        Ok::<_, Error>(iter(messages))
-                    };
-
-                Some(messages.await)
-            }
-        };
-
-        let autoclaim = select_all(autoclaim_futs);
-        let claim = repeat_fn(claim_fut).try_flatten();
-
-        stream_select!(autoclaim, claim)
+        select_all(futs)
     }
 }
 
@@ -279,9 +277,9 @@ impl RedisBroker {
 mod test {
     use std::time::{Duration, SystemTime};
 
-    use deadpool_redis::{Manager, Pool};
+    use bytes::Bytes;
     use futures::TryStreamExt;
-    use redis::cmd;
+    use redust::pool::{Manager, Pool};
     use tokio::{spawn, try_join};
 
     use super::RedisBroker;
@@ -289,24 +287,24 @@ mod test {
     #[tokio::test]
     async fn consumes_messages() {
         let group = "foo";
-        let manager = Manager::new("redis://localhost:6379").expect("create manager");
-        let pool = Pool::new(manager, 32);
-        let broker = RedisBroker::new(group, pool, "redis://localhost:6379");
+        let manager = Manager::new(([127, 0, 0, 1], 6379).into());
+        let pool = Pool::builder(manager).build().expect("pool builder");
+        let broker = RedisBroker::new(group, pool);
 
-        let events = ["abc"];
+        let events = [Bytes::from("abc")];
 
-        broker.subscribe(&events).await.expect("subscribed");
+        broker.subscribe(events.iter()).await.expect("subscribed");
         broker
             .publish("abc", &[1u8, 2, 3])
             .await
             .expect("published");
 
-        let mut consumer = broker.consume::<_, Vec<u8>>(&events);
+        let mut consumer = broker.consume::<Vec<u8>>(events.to_vec());
         let msg = consumer
             .try_next()
             .await
-            .expect("message")
-            .expect("message");
+            .expect("read message")
+            .expect("read message");
         msg.ack().await.expect("ack");
 
         assert_eq!(msg.data.expect("data"), vec![1, 2, 3]);
@@ -315,19 +313,14 @@ mod test {
     #[tokio::test]
     async fn rpc_timeout() {
         let group = "foo";
-        let manager = Manager::new("redis://localhost:6379").expect("create manager");
-        let pool = Pool::new(manager, 32);
+        let manager = Manager::new(([127, 0, 0, 1], 6379).into());
+        let pool = Pool::builder(manager).build().expect("pool builder");
 
-        let _: () = cmd("FLUSHDB")
-            .query_async(&mut pool.get().await.expect("redis connection"))
-            .await
-            .expect("flush db");
-
-        let broker1 = RedisBroker::new(group, pool, "localhost:6379");
+        let broker1 = RedisBroker::new(group, pool);
         let broker2 = broker1.clone();
 
-        let events = ["def"];
-        broker1.subscribe(&events).await.expect("subscribed");
+        let events = [Bytes::from("def")];
+        broker1.subscribe(events.iter()).await.expect("subscribed");
 
         let timeout = Some(SystemTime::now() + Duration::from_millis(500));
 
@@ -339,7 +332,7 @@ mod test {
         });
 
         let consume_fut = spawn(async move {
-            let mut consumer = broker1.consume::<_, Vec<u8>>(&events);
+            let mut consumer = broker1.consume::<Vec<u8>>(events.to_vec());
             let msg = consumer
                 .try_next()
                 .await

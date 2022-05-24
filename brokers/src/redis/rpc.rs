@@ -1,5 +1,6 @@
-use futures::TryStreamExt;
+use redust::resp::from_data;
 use serde::de::DeserializeOwned;
+use serde_bytes::Bytes;
 
 use crate::error::Result;
 
@@ -7,32 +8,30 @@ use super::RedisBroker;
 
 /// A Remote Procedure Call. Poll the future returned by `response` to get the response value.
 #[derive(Debug, Clone)]
-pub struct Rpc<'broker> {
+pub struct Rpc {
     pub(crate) name: String,
-    pub(crate) broker: &'broker RedisBroker,
+    pub(crate) broker: RedisBroker,
 }
 
-impl<'broker> PartialEq for Rpc<'broker> {
+impl PartialEq for Rpc {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
 }
 
-impl<'broker> Eq for Rpc<'broker> {}
+impl Eq for Rpc {}
 
-impl<'broker> Rpc<'broker> {
+impl Rpc {
     pub async fn response<V>(&self) -> Result<Option<V>>
     where
         V: DeserializeOwned,
     {
-        Ok(self
-            .broker
-            .pubsub
-            .subscribe(self.name.clone())
-            .await?
-            .try_next()
-            .await?
-            .map(|msg| rmp_serde::from_read(msg.as_bytes()))
-            .transpose()?)
+        let mut conn = self.broker.pool.get().await?;
+
+        conn.cmd(["subscribe", &self.name]).await?;
+        let data = conn.read_cmd().await?;
+
+        let bytes = from_data::<&Bytes>(data)?;
+        Ok(rmp_serde::from_read_ref(bytes)?)
     }
 }

@@ -1,5 +1,3 @@
-#[cfg(feature = "redis-broker")]
-use deadpool_redis::{redis::RedisError, PoolError};
 #[cfg(feature = "amqp-broker")]
 use lapin::Error as LapinError;
 use std::{io::Error as IoError, result::Result as StdResult};
@@ -31,15 +29,11 @@ pub enum Error {
 
     #[cfg(feature = "redis-broker")]
     #[error("Redis error")]
-    Redis(#[from] RedisError),
+    Redis(#[from] redust::Error),
 
     #[cfg(feature = "redis-broker")]
     #[error("Pool error")]
-    Deadpool(#[from] PoolError),
-
-    #[cfg(feature = "redis-broker")]
-    #[error("Redis subscribe error")]
-    RedisSub(#[from] redis_subscribe::Error),
+    Pool(#[from] redust::pool::PoolError),
 
     #[error("MessagePack encode error")]
     MsgpackEncode(#[from] rmp_serde::encode::Error),

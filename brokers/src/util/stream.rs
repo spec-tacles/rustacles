@@ -1,5 +1,5 @@
-use futures::Stream;
-use std::{future::Future, task::Poll};
+use futures::{stream::poll_fn, Stream};
+use std::future::Future;
 
 pub fn repeat_fn<F, R, O>(mut func: F) -> impl Stream<Item = O>
 where
@@ -8,10 +8,10 @@ where
 {
     let mut fut = Box::pin(func());
 
-    futures::stream::poll_fn(move |ctx| {
+    poll_fn(move |ctx| {
         let out = fut.as_mut().poll(ctx);
 
-        if let Poll::Ready(_) = out {
+        if out.is_ready() {
             fut.set(func());
         }
 

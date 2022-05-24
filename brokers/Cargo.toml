@@ -11,17 +11,17 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-deadpool-redis = { version = "0.9", optional = true }
 lapin = { version = "1.1", optional = true }
+bytes = "1.1"
 env_logger = "0.7"
 futures = "0.3"
 log = "0.4"
 nanoid = "0.3"
 pin-project = "1.0"
-redis = { version = "0.21", optional = true, default-features = false, features = ["streams"] }
-redis-subscribe = { git = "https://github.com/appellation/redis-subscribe", branch = "feat/impl-error", optional = true }
+redust = { version = "0.1", features = ["model", "pool"], optional = true }
 rmp-serde = "0.15"
 serde = "1.0"
+serde_bytes = "0.11"
 thiserror = "1.0"
 tokio = "1.0"
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -32,7 +32,7 @@ features = ["rt-multi-thread", "macros"]
 
 [features]
 amqp-broker = ["lapin"]
-redis-broker = ["deadpool-redis", "redis", "redis-subscribe"]
+redis-broker = ["redust"]
 
 [[example]]
 name = "amqp_consumer"
