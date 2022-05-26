@@ -9,6 +9,7 @@ use futures::{
     StreamExt, TryStream, TryStreamExt,
 };
 use nanoid::nanoid;
+pub use redust;
 use redust::{
     model::stream::{
         claim::AutoclaimResponse,
