@@ -18,12 +18,12 @@ futures = "0.3"
 log = "0.4"
 nanoid = "0.3"
 pin-project = "1.0"
-redust = { version = "0.1", features = ["model", "pool"], optional = true }
+redust = { git = "https://github.com/appellation/redust", features = ["model", "pool"], optional = true }
 rmp-serde = "0.15"
 serde = "1.0"
 serde_bytes = "0.11"
 thiserror = "1.0"
-tokio = "1.0"
+tokio = "1"
 tokio-stream = { version = "0.1", features = ["sync"] }
 
 [dev-dependencies.tokio]

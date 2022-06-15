@@ -7,6 +7,7 @@ use std::{
 use bytes::Bytes;
 use redust::model::stream::{read::Entry, Id};
 use serde::{de::DeserializeOwned, Serialize};
+use tokio::net::ToSocketAddrs;
 
 use crate::error::Result;
 
@@ -14,7 +15,10 @@ use super::{RedisBroker, STREAM_DATA_KEY, STREAM_TIMEOUT_KEY};
 
 /// A message received from the broker.
 #[derive(Debug, Clone)]
-pub struct Message<V> {
+pub struct Message<A, V>
+where
+    A: ToSocketAddrs + Clone + Send + Sync,
+{
     /// The group this message belongs to.
     pub group: Bytes,
     /// The event this message signals.
@@ -26,22 +30,26 @@ pub struct Message<V> {
     /// When this message times out. Clients should cancel work if it is still in progress after
     /// this instant.
     pub timeout_at: Option<SystemTime>,
-    broker: RedisBroker,
+    broker: RedisBroker<A>,
 }
 
-impl<V> PartialEq for Message<V> {
+impl<A, V> PartialEq for Message<A, V>
+where
+    A: ToSocketAddrs + Clone + Send + Sync,
+{
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl<V> Eq for Message<V> {}
+impl<A, V> Eq for Message<A, V> where A: ToSocketAddrs + Clone + Send + Sync {}
 
-impl<V> Message<V>
+impl<A, V> Message<A, V>
 where
+    A: ToSocketAddrs + Clone + Send + Sync,
     V: DeserializeOwned,
 {
-    pub(crate) fn new(id: Id, entry: Entry, event: Bytes, broker: RedisBroker) -> Self {
+    pub(crate) fn new(id: Id, entry: Entry, event: Bytes, broker: RedisBroker<A>) -> Self {
         let data = entry
             .get(&STREAM_DATA_KEY)
             .and_then(|value| rmp_serde::from_read_ref(&value.0).ok());
@@ -62,7 +70,10 @@ where
     }
 }
 
-impl<V> Message<V> {
+impl<A, V> Message<A, V>
+where
+    A: ToSocketAddrs + Clone + Send + Sync,
+{
     /// Acknowledge receipt of the message. This should always be called, since un-acked messages
     /// will be reclaimed by other clients.
     pub async fn ack(&self) -> Result<()> {

@@ -6,7 +6,7 @@ use std::{
 use bytes::Bytes;
 use futures::{
     stream::{iter, select, select_all},
-    StreamExt, TryStream, TryStreamExt,
+    TryStream, TryStreamExt,
 };
 use nanoid::nanoid;
 pub use redust;
@@ -20,6 +20,7 @@ use redust::{
     resp::from_data,
 };
 use serde::{de::DeserializeOwned, Serialize};
+use tokio::net::ToSocketAddrs;
 
 use crate::{
     error::{Error, Result},
@@ -38,18 +39,24 @@ const STREAM_TIMEOUT_KEY: Field<'static> = Field(Cow::Borrowed(b"timeout_at"));
 
 /// RedisBroker is internally reference counted and can be safely cloned.
 #[derive(Debug, Clone)]
-pub struct RedisBroker {
+pub struct RedisBroker<A>
+where
+    A: ToSocketAddrs + Clone + Send + Sync,
+{
     /// The consumer name of this broker. Should be unique to the container/machine consuming
     /// messages.
     pub name: Bytes,
     /// The consumer group name.
     pub group: Bytes,
-    pool: Pool,
+    pool: Pool<A>,
 }
 
-impl RedisBroker {
+impl<A> RedisBroker<A>
+where
+    A: ToSocketAddrs + Clone + Send + Sync,
+{
     /// Creates a new broker with sensible defaults.
-    pub fn new(group: impl Into<Bytes>, pool: Pool) -> Self {
+    pub fn new(group: impl Into<Bytes>, pool: Pool<A>) -> Self {
         let group = group.into();
         let name = nanoid!();
 
@@ -83,7 +90,7 @@ impl RedisBroker {
         event: &str,
         data: &impl Serialize,
         timeout: Option<SystemTime>,
-    ) -> Result<Rpc> {
+    ) -> Result<Rpc<A>> {
         let id = if let Some(timeout) = timeout {
             self.publish_timeout(event, data, timeout).await?
         } else {
@@ -153,20 +160,20 @@ impl RedisBroker {
     }
 
     /// Consume events from the broker.
-    pub fn consume<V>(&self, events: Vec<Bytes>) -> impl TryStream<Ok = Message<V>, Error = Error>
+    pub fn consume<V>(
+        &self,
+        events: Vec<Bytes>,
+    ) -> impl TryStream<Ok = Message<A, V>, Error = Error>
     where
         V: DeserializeOwned + 'static,
     {
-        let autoclaim = self
-            .autoclaim_all::<V>(events.clone())
-            .into_stream()
-            .boxed();
-        let claim = self.claim::<V>(events).into_stream().boxed();
+        let autoclaim = self.autoclaim_all::<V>(events.clone()).into_stream();
+        let claim = self.claim::<V>(events).into_stream();
 
         select(autoclaim, claim)
     }
 
-    fn claim<V>(&self, events: Vec<Bytes>) -> impl TryStream<Ok = Message<V>, Error = Error>
+    fn claim<V>(&self, events: Vec<Bytes>) -> impl TryStream<Ok = Message<A, V>, Error = Error>
     where
         V: DeserializeOwned,
     {
@@ -184,7 +191,7 @@ impl RedisBroker {
     async fn get_messages<V>(
         &self,
         events: &[Bytes],
-    ) -> Result<impl TryStream<Ok = Message<V>, Error = Error>>
+    ) -> Result<impl TryStream<Ok = Message<A, V>, Error = Error>>
     where
         V: DeserializeOwned,
     {
@@ -194,7 +201,7 @@ impl RedisBroker {
         let messages = read.0.into_iter().flat_map(move |(event, entries)| {
             let this = this.clone();
             entries.0.into_iter().map(move |(id, entry)| {
-                Ok(Message::<V>::new(
+                Ok(Message::<A, V>::new(
                     id,
                     entry,
                     Bytes::copy_from_slice(&event.0),
@@ -242,7 +249,10 @@ impl RedisBroker {
         Ok(from_data(res)?)
     }
 
-    fn autoclaim_all<V>(&self, events: Vec<Bytes>) -> impl TryStream<Ok = Message<V>, Error = Error>
+    fn autoclaim_all<V>(
+        &self,
+        events: Vec<Bytes>,
+    ) -> impl TryStream<Ok = Message<A, V>, Error = Error>
     where
         V: DeserializeOwned,
     {
@@ -258,7 +268,12 @@ impl RedisBroker {
                         let read = this.xautoclaim(&event).await?;
 
                         let messages = read.1 .0.into_iter().map(move |(id, data)| {
-                            Ok::<_, Error>(Message::<V>::new(id, data, event.clone(), this.clone()))
+                            Ok::<_, Error>(Message::<A, V>::new(
+                                id,
+                                data,
+                                event.clone(),
+                                this.clone(),
+                            ))
                         });
 
                         Ok::<_, Error>(iter(messages))
@@ -288,7 +303,7 @@ mod test {
     #[tokio::test]
     async fn consumes_messages() {
         let group = "foo";
-        let manager = Manager::new(([127, 0, 0, 1], 6379).into());
+        let manager = Manager::new("localhost:6379");
         let pool = Pool::builder(manager).build().expect("pool builder");
         let broker = RedisBroker::new(group, pool);
 
@@ -314,7 +329,7 @@ mod test {
     #[tokio::test]
     async fn rpc_timeout() {
         let group = "foo";
-        let manager = Manager::new(([127, 0, 0, 1], 6379).into());
+        let manager = Manager::new("localhost:6379");
         let pool = Pool::builder(manager).build().expect("pool builder");
 
         let broker1 = RedisBroker::new(group, pool);

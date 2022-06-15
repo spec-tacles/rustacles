@@ -1,6 +1,7 @@
 use redust::resp::from_data;
 use serde::de::DeserializeOwned;
 use serde_bytes::Bytes;
+use tokio::net::ToSocketAddrs;
 
 use crate::error::Result;
 
@@ -8,20 +9,29 @@ use super::RedisBroker;
 
 /// A Remote Procedure Call. Poll the future returned by `response` to get the response value.
 #[derive(Debug, Clone)]
-pub struct Rpc {
+pub struct Rpc<A>
+where
+    A: ToSocketAddrs + Clone + Send + Sync,
+{
     pub(crate) name: String,
-    pub(crate) broker: RedisBroker,
+    pub(crate) broker: RedisBroker<A>,
 }
 
-impl PartialEq for Rpc {
+impl<A> PartialEq for Rpc<A>
+where
+    A: ToSocketAddrs + Clone + Send + Sync,
+{
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
 }
 
-impl Eq for Rpc {}
+impl<A> Eq for Rpc<A> where A: ToSocketAddrs + Clone + Send + Sync {}
 
-impl Rpc {
+impl<A> Rpc<A>
+where
+    A: ToSocketAddrs + Clone + Send + Sync,
+{
     pub async fn response<V>(&self) -> Result<Option<V>>
     where
         V: DeserializeOwned,
