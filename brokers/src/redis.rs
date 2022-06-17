@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH}, fmt::Debug,
 };
 
 use bytes::Bytes;
@@ -41,7 +41,7 @@ const STREAM_TIMEOUT_KEY: Field<'static> = Field(Cow::Borrowed(b"timeout_at"));
 #[derive(Debug, Clone)]
 pub struct RedisBroker<A>
 where
-    A: ToSocketAddrs + Clone + Send + Sync,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
     /// The consumer name of this broker. Should be unique to the container/machine consuming
     /// messages.
@@ -53,7 +53,7 @@ where
 
 impl<A> RedisBroker<A>
 where
-    A: ToSocketAddrs + Clone + Send + Sync,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
     /// Creates a new broker with sensible defaults.
     pub fn new(group: impl Into<Bytes>, pool: Pool<A>) -> Self {
@@ -329,20 +329,22 @@ mod test {
     #[tokio::test]
     async fn rpc_timeout() {
         let group = "foo";
+        let event = "def";
+        let events = [Bytes::from(event)];
+
         let manager = Manager::new("localhost:6379");
         let pool = Pool::builder(manager).build().expect("pool builder");
 
         let broker1 = RedisBroker::new(group, pool);
         let broker2 = broker1.clone();
 
-        let events = [Bytes::from("def")];
         broker1.subscribe(events.iter()).await.expect("subscribed");
 
         let timeout = Some(SystemTime::now() + Duration::from_millis(500));
 
         let call_fut = spawn(async move {
             broker2
-                .call("def", &[1u8, 2, 3], timeout)
+                .call(event, &[1u8, 2, 3], timeout)
                 .await
                 .expect("published");
         });

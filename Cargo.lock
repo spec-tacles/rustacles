@@ -97,7 +97,7 @@ checksum = "52580991739c5cdb36cde8b2a516371c0a3b70dda36d916cc08b82372916808c"
 dependencies = [
  "async-channel",
  "async-lock",
- "crossbeam-utils 0.8.8",
+ "crossbeam-utils 0.8.9",
  "futures-channel",
  "futures-core",
  "futures-io",
@@ -318,12 +318,12 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.4"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aaa7bd5fb665c6864b5f963dd9097905c54125909c7aa94c9e18507cdbe6c53"
+checksum = "4c02a4d71819009c192cf4872265391563fd6a84c81ff2c0f2a7026ca4c1d85c"
 dependencies = [
  "cfg-if 1.0.0",
- "crossbeam-utils 0.8.8",
+ "crossbeam-utils 0.8.9",
 ]
 
 [[package]]
@@ -376,12 +376,12 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-utils"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bf124c720b7686e3c2663cf54062ab0f68a88af2fb6a030e87e30bf721fcb38"
+checksum = "8ff1f980957787286a554052d03c7aee98d99cc32e09f6d45f0a814133c87978"
 dependencies = [
  "cfg-if 1.0.0",
- "lazy_static",
+ "once_cell",
 ]
 
 [[package]]
@@ -652,9 +652,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.11.2"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
+checksum = "db0d4cf898abf0081f964436dc980e96670a0f36863e4b83aaacdb65c9d7ccc3"
 
 [[package]]
 name = "hermit-abi"
@@ -757,9 +757,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "1.8.2"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6012d540c5baa3589337a98ce73408de9b5a25ec9fc2c6fd6be8f0d39e0ca5a"
+checksum = "6c6392766afd7964e2531940894cffe4bd8d7d17dbc3c1c4857040fd4b33bdb3"
 dependencies = [
  "autocfg 1.1.0",
  "hashbrown",
@@ -1524,7 +1524,7 @@ dependencies = [
 [[package]]
 name = "redust"
 version = "0.2.0"
-source = "git+https://github.com/appellation/redust#8fd2c0ac39c123d51e2e657ab5fcf2523265651e"
+source = "git+https://github.com/appellation/redust#0fe77199b4cda3d2ed9586e2d18f0b21e6836a60"
 dependencies = [
  "async-trait",
  "bytes 1.1.0",
@@ -1536,12 +1536,13 @@ dependencies = [
  "serde_bytes",
  "tokio 1.19.2",
  "tokio-util 0.7.3",
+ "tracing",
 ]
 
 [[package]]
 name = "redust-resp"
 version = "0.2.0"
-source = "git+https://github.com/appellation/redust#8fd2c0ac39c123d51e2e657ab5fcf2523265651e"
+source = "git+https://github.com/appellation/redust#0fe77199b4cda3d2ed9586e2d18f0b21e6836a60"
 dependencies = [
  "bytes 1.1.0",
  "itertools",
@@ -2132,7 +2133,19 @@ dependencies = [
  "cfg-if 1.0.0",
  "log",
  "pin-project-lite 0.2.9",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc6b8ad3567499f98a1db7a752b07a7c8c7c7c34c332ec00effb2b0027974b7c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use redust::resp::from_data;
 use serde::de::DeserializeOwned;
 use serde_bytes::Bytes;
@@ -11,7 +13,7 @@ use super::RedisBroker;
 #[derive(Debug, Clone)]
 pub struct Rpc<A>
 where
-    A: ToSocketAddrs + Clone + Send + Sync,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
     pub(crate) name: String,
     pub(crate) broker: RedisBroker<A>,
@@ -19,18 +21,18 @@ where
 
 impl<A> PartialEq for Rpc<A>
 where
-    A: ToSocketAddrs + Clone + Send + Sync,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
 }
 
-impl<A> Eq for Rpc<A> where A: ToSocketAddrs + Clone + Send + Sync {}
+impl<A> Eq for Rpc<A> where A: ToSocketAddrs + Clone + Send + Sync + Debug {}
 
 impl<A> Rpc<A>
 where
-    A: ToSocketAddrs + Clone + Send + Sync,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
     pub async fn response<V>(&self) -> Result<Option<V>>
     where

@@ -1,7 +1,7 @@
 use std::{
     io::Write,
     str::from_utf8,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH}, fmt::Debug,
 };
 
 use bytes::Bytes;
@@ -17,7 +17,7 @@ use super::{RedisBroker, STREAM_DATA_KEY, STREAM_TIMEOUT_KEY};
 #[derive(Debug, Clone)]
 pub struct Message<A, V>
 where
-    A: ToSocketAddrs + Clone + Send + Sync,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
     /// The group this message belongs to.
     pub group: Bytes,
@@ -35,18 +35,18 @@ where
 
 impl<A, V> PartialEq for Message<A, V>
 where
-    A: ToSocketAddrs + Clone + Send + Sync,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl<A, V> Eq for Message<A, V> where A: ToSocketAddrs + Clone + Send + Sync {}
+impl<A, V> Eq for Message<A, V> where A: ToSocketAddrs + Clone + Send + Sync + Debug {}
 
 impl<A, V> Message<A, V>
 where
-    A: ToSocketAddrs + Clone + Send + Sync,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
     V: DeserializeOwned,
 {
     pub(crate) fn new(id: Id, entry: Entry, event: Bytes, broker: RedisBroker<A>) -> Self {
@@ -72,7 +72,7 @@ where
 
 impl<A, V> Message<A, V>
 where
-    A: ToSocketAddrs + Clone + Send + Sync,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
     /// Acknowledge receipt of the message. This should always be called, since un-acked messages
     /// will be reclaimed by other clients.
