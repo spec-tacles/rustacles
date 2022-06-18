@@ -1,8 +1,7 @@
 use std::fmt::Debug;
 
-use redust::resp::from_data;
+use redust::{model::pubsub, resp::from_data};
 use serde::de::DeserializeOwned;
-use serde_bytes::Bytes;
 use tokio::net::ToSocketAddrs;
 
 use crate::error::Result;
@@ -39,11 +38,15 @@ where
         V: DeserializeOwned,
     {
         let mut conn = self.broker.pool.get().await?;
+        conn.cmd(["SUBSCRIBE", &self.name]).await?;
 
-        conn.cmd(["subscribe", &self.name]).await?;
-        let data = conn.read_cmd().await?;
+        loop {
+            let response = from_data::<pubsub::Response>(conn.read_cmd().await?)?;
 
-        let bytes = from_data::<&Bytes>(data)?;
-        Ok(rmp_serde::from_read_ref(bytes)?)
+            if let pubsub::Response::Message(msg) = response {
+                conn.cmd(["UNSUBSCRIBE", &self.name]).await?;
+                break Ok(rmp_serde::from_read_ref(&msg.data)?);
+            }
+        }
     }
 }

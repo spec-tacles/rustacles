@@ -23,7 +23,7 @@ use redust::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::{net::ToSocketAddrs, time::sleep};
-use tracing::{instrument, debug};
+use tracing::{debug, instrument};
 
 use crate::{
     error::{Error, Result},
@@ -76,7 +76,11 @@ where
 
     /// Publishes an event to the broker. Returned value is the ID of the message.
     #[instrument(ret, err)]
-    pub async fn publish(&self, event: impl AsRef<[u8]> + Debug, data: &(impl Serialize + Debug)) -> Result<Id> {
+    pub async fn publish(
+        &self,
+        event: impl AsRef<[u8]> + Debug,
+        data: &(impl Serialize + Debug),
+    ) -> Result<Id> {
         let serialized_data = rmp_serde::to_vec(data)?;
         let mut conn = self.pool.get().await?;
 
@@ -248,11 +252,7 @@ where
 
     #[instrument(ret, err)]
     async fn xautoclaim(&self, event: &[u8]) -> Result<Entries<'static>, Error> {
-        let id = self
-            .last_autoclaim
-            .read()
-            .unwrap()
-            .to_string();
+        let id = self.last_autoclaim.read().unwrap().to_string();
 
         let cmd = [
             b"XAUTOCLAIM",

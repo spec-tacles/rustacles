@@ -95,8 +95,7 @@ where
 
     /// Reply to this message.
     pub async fn reply(&self, data: &impl Serialize) -> Result<()> {
-        let mut key = Vec::new();
-        key.copy_from_slice(&self.event);
+        let mut key = self.event.to_vec();
         write!(key, ":{}", self.id)?;
 
         let serialized = rmp_serde::to_vec(data)?;
