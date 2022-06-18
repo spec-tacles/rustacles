@@ -8,7 +8,6 @@ use lapin::{
     message::Delivery, options::*, types::FieldTable, BasicProperties, Channel, Connection,
     ConnectionProperties, ExchangeKind,
 };
-use log::debug;
 use nanoid::nanoid;
 pub use tokio::sync::{mpsc, oneshot, Mutex};
 
@@ -181,11 +180,6 @@ impl AmqpBroker {
         payload: Vec<u8>,
         properties: AmqpProperties,
     ) -> Result<()> {
-        debug!(
-            "[Rustacles_BROKER] Publishing event: {} to the AMQP server.",
-            evt
-        );
-
         self.publisher
             .basic_publish(
                 self.group.as_str(),

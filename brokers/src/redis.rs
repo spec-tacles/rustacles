@@ -23,6 +23,7 @@ use redust::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::{net::ToSocketAddrs, time::sleep};
+use tracing::{instrument, debug};
 
 use crate::{
     error::{Error, Result},
@@ -74,7 +75,8 @@ where
     }
 
     /// Publishes an event to the broker. Returned value is the ID of the message.
-    pub async fn publish(&self, event: impl AsRef<[u8]>, data: &impl Serialize) -> Result<Id> {
+    #[instrument(ret, err)]
+    pub async fn publish(&self, event: impl AsRef<[u8]> + Debug, data: &(impl Serialize + Debug)) -> Result<Id> {
         let serialized_data = rmp_serde::to_vec(data)?;
         let mut conn = self.pool.get().await?;
 
@@ -91,10 +93,11 @@ where
         Ok(from_data(data)?)
     }
 
+    #[instrument(ret, err)]
     pub async fn call(
         &self,
         event: &str,
-        data: &impl Serialize,
+        data: &(impl Serialize + Debug),
         timeout: Option<SystemTime>,
     ) -> Result<Rpc<A>> {
         let id = if let Some(timeout) = timeout {
@@ -111,10 +114,11 @@ where
         })
     }
 
+    #[instrument(ret, err)]
     pub async fn publish_timeout(
         &self,
-        event: impl AsRef<[u8]>,
-        data: &impl Serialize,
+        event: impl AsRef<[u8]> + Debug,
+        data: &(impl Serialize + Debug),
         timeout: SystemTime,
     ) -> Result<Id> {
         let serialized_data = rmp_serde::to_vec(data)?;
@@ -142,7 +146,8 @@ where
         Ok(from_data(data)?)
     }
 
-    pub async fn subscribe(&self, events: impl Iterator<Item = &Bytes>) -> Result<()> {
+    #[instrument(ret, err)]
+    pub async fn subscribe(&self, events: impl Iterator<Item = &Bytes> + Debug) -> Result<()> {
         let mut conn = self.pool.get().await?;
 
         for event in events {
@@ -219,6 +224,7 @@ where
         Ok::<_, Error>(iter(messages))
     }
 
+    #[instrument(ret, err)]
     async fn xreadgroup(&self, events: &[Bytes]) -> Result<ReadResponse<'static>, Error> {
         let ids = vec![&b">"[..]; events.len()];
         let mut cmd: Vec<&[u8]> = vec![
@@ -236,9 +242,11 @@ where
         cmd.extend_from_slice(&ids);
 
         let data = self.pool.get().await?.cmd(cmd).await?;
+        debug!(?data);
         Ok(from_data(data)?)
     }
 
+    #[instrument(ret, err)]
     async fn xautoclaim(&self, event: &[u8]) -> Result<Entries<'static>, Error> {
         let id = self
             .last_autoclaim
@@ -259,7 +267,10 @@ where
 
         let mut conn = self.pool.get().await?;
 
-        let res = from_data::<AutoclaimResponse>(conn.cmd(cmd).await?)?;
+        let data = conn.cmd(cmd).await?;
+        debug!(?data);
+
+        let res = from_data::<AutoclaimResponse>(data)?;
         *self.last_autoclaim.write().unwrap() = res.0;
         Ok(res.1)
     }
