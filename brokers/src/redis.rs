@@ -1,26 +1,28 @@
 use std::{
     borrow::Cow,
-    time::{SystemTime, UNIX_EPOCH}, fmt::Debug,
+    fmt::Debug,
+    sync::{Arc, RwLock},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use bytes::Bytes;
 use futures::{
     stream::{iter, select, select_all},
-    TryStream, TryStreamExt,
+    Future, TryStream, TryStreamExt,
 };
 use nanoid::nanoid;
 pub use redust;
 use redust::{
     model::stream::{
         claim::AutoclaimResponse,
-        read::{Field, ReadResponse},
+        read::{Entries, Field, ReadResponse},
         Id,
     },
     pool::Pool,
     resp::from_data,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::net::ToSocketAddrs;
+use tokio::{net::ToSocketAddrs, time::sleep};
 
 use crate::{
     error::{Error, Result},
@@ -34,6 +36,8 @@ pub mod rpc;
 
 const DEFAULT_MAX_CHUNK: &[u8] = b"10";
 const DEFAULT_BLOCK_INTERVAL: &[u8] = b"5000";
+const DEFAULT_BLOCK_DURATION: Duration = Duration::from_secs(5);
+const DEFAULT_MIN_IDLE_TIME: &[u8] = b"10000";
 const STREAM_DATA_KEY: Field<'static> = Field(Cow::Borrowed(b"data"));
 const STREAM_TIMEOUT_KEY: Field<'static> = Field(Cow::Borrowed(b"timeout_at"));
 
@@ -49,6 +53,7 @@ where
     /// The consumer group name.
     pub group: Bytes,
     pool: Pool<A>,
+    last_autoclaim: Arc<RwLock<Id>>,
 }
 
 impl<A> RedisBroker<A>
@@ -64,6 +69,7 @@ where
             name: name.into(),
             group,
             pool,
+            last_autoclaim: Arc::default(),
         }
     }
 
@@ -74,7 +80,7 @@ where
 
         let data = conn
             .cmd([
-                b"xadd",
+                b"XADD",
                 event.as_ref(),
                 b"*",
                 &STREAM_DATA_KEY.0,
@@ -123,7 +129,7 @@ where
 
         let data = conn
             .cmd([
-                b"xadd",
+                b"XADD",
                 event.as_ref(),
                 b"*",
                 &STREAM_DATA_KEY.0,
@@ -141,12 +147,12 @@ where
 
         for event in events {
             let cmd: &[&[u8]] = &[
-                b"xgroup",
-                b"create",
+                b"XGROUP",
+                b"CREATE",
                 &*event,
                 &*self.group,
                 b"$",
-                b"mkstream",
+                b"MKSTREAM",
             ];
 
             match conn.cmd(cmd).await {
@@ -216,15 +222,15 @@ where
     async fn xreadgroup(&self, events: &[Bytes]) -> Result<ReadResponse<'static>, Error> {
         let ids = vec![&b">"[..]; events.len()];
         let mut cmd: Vec<&[u8]> = vec![
-            b"xreadgroup",
-            b"group",
+            b"XREADGROUP",
+            b"GROUP",
             &*self.group,
             &*self.name,
-            b"count",
+            b"COUNT",
             DEFAULT_MAX_CHUNK,
-            b"block",
+            b"BLOCK",
             DEFAULT_BLOCK_INTERVAL,
-            b"streams",
+            b"STREAMS",
         ];
         cmd.extend(events.iter().map(|b| &b[..]));
         cmd.extend_from_slice(&ids);
@@ -233,20 +239,29 @@ where
         Ok(from_data(data)?)
     }
 
-    async fn xautoclaim(&self, event: &[u8]) -> Result<AutoclaimResponse<'static>, Error> {
+    async fn xautoclaim(&self, event: &[u8]) -> Result<Entries<'static>, Error> {
+        let id = self
+            .last_autoclaim
+            .read()
+            .unwrap()
+            .to_string();
+
         let cmd = [
-            b"xautoclaim",
+            b"XAUTOCLAIM",
             event,
             &*self.group,
             &*self.name,
-            DEFAULT_BLOCK_INTERVAL,
-            b"0-0",
+            DEFAULT_MIN_IDLE_TIME,
+            id.as_bytes(),
+            b"COUNT",
+            DEFAULT_MAX_CHUNK,
         ];
 
         let mut conn = self.pool.get().await?;
 
-        let res = conn.cmd(cmd).await?;
-        Ok(from_data(res)?)
+        let res = from_data::<AutoclaimResponse>(conn.cmd(cmd).await?)?;
+        *self.last_autoclaim.write().unwrap() = res.0;
+        Ok(res.1)
     }
 
     fn autoclaim_all<V>(
@@ -260,32 +275,46 @@ where
             .into_iter()
             .map(|event| {
                 let this = self.clone();
-                move || {
-                    let this = this.clone();
-                    let event = event.clone();
-
-                    let messages = async move {
-                        let read = this.xautoclaim(&event).await?;
-
-                        let messages = read.1 .0.into_iter().map(move |(id, data)| {
-                            Ok::<_, Error>(Message::<A, V>::new(
-                                id,
-                                data,
-                                event.clone(),
-                                this.clone(),
-                            ))
-                        });
-
-                        Ok::<_, Error>(iter(messages))
-                    };
-
-                    async move { Some(messages.await) }
-                }
+                move || this.autoclaim_event(event.clone())
             })
             .map(repeat_fn)
-            .map(|iter| iter.try_flatten());
+            .map(TryStreamExt::try_flatten);
 
         select_all(futs)
+    }
+
+    /// Autoclaim an event and return a stream of messages found during the autoclaim. The returned
+    /// future output is always [`Some`], intended to improve ergonomics when used with
+    /// [`repeat_fn`].
+    ///
+    /// Delays every invocation of `xautoclaim` by [`DEFAULT_BLOCK_DURATION`], since `xautoclaim`
+    /// does not support blocking.
+    fn autoclaim_event<V>(
+        &self,
+        event: Bytes,
+    ) -> impl Future<Output = Option<Result<impl TryStream<Ok = Message<A, V>, Error = Error>>>>
+    where
+        V: DeserializeOwned,
+    {
+        let this = self.clone();
+        let event = event.clone();
+
+        let messages = async move {
+            sleep(DEFAULT_BLOCK_DURATION).await;
+
+            let messages = this
+                .xautoclaim(&event)
+                .await?
+                .0
+                .into_iter()
+                .map(move |(id, data)| {
+                    Ok::<_, Error>(Message::<A, V>::new(id, data, event.clone(), this.clone()))
+                });
+
+            Ok::<_, Error>(iter(messages))
+        };
+
+        async move { Some(messages.await) }
     }
 }
 

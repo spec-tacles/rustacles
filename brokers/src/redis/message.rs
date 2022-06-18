@@ -1,7 +1,8 @@
 use std::{
+    fmt::Debug,
     io::Write,
     str::from_utf8,
-    time::{Duration, SystemTime, UNIX_EPOCH}, fmt::Debug,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use bytes::Bytes;
