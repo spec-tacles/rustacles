@@ -91,9 +91,9 @@ dependencies = [
 
 [[package]]
 name = "async-std"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52580991739c5cdb36cde8b2a516371c0a3b70dda36d916cc08b82372916808c"
+checksum = "62565bb4402e926b29953c785397c6dc0391b7b446e45008b0049eb43cec6f5d"
 dependencies = [
  "async-channel",
  "async-lock",
@@ -1343,9 +1343,9 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quote"
-version = "1.0.18"
+version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1feb54ed693b93a84e14094943b84b7c4eae204c512b7ccb95ab0c66d278ad1"
+checksum = "f53dc8cf16a769a6f677e09e7ff2cd4be1ea0f48754aac39520536962011de0d"
 dependencies = [
  "proc-macro2",
 ]
@@ -1524,7 +1524,7 @@ dependencies = [
 [[package]]
 name = "redust"
 version = "0.2.0"
-source = "git+https://github.com/appellation/redust#bde8446b30b5366c89c431eb61079f90fdf08f3d"
+source = "git+https://github.com/appellation/redust#5630fd224876b245524a74d7d50346d0d84b63a9"
 dependencies = [
  "async-trait",
  "bytes 1.1.0",
@@ -1542,7 +1542,7 @@ dependencies = [
 [[package]]
 name = "redust-resp"
 version = "0.2.0"
-source = "git+https://github.com/appellation/redust#bde8446b30b5366c89c431eb61079f90fdf08f3d"
+source = "git+https://github.com/appellation/redust#5630fd224876b245524a74d7d50346d0d84b63a9"
 dependencies = [
  "bytes 1.1.0",
  "itertools",
@@ -1857,9 +1857,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "1.0.96"
+version = "1.0.97"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0748dd251e24453cb8717f0354206b91557e4ec8703673a4b30208f2abaf1ebf"
+checksum = "233d6785e2e6b8442eb26736eaef8c8f0ce0e575c1457d06c3f2812f9cb4c8a0"
 dependencies = [
  "proc-macro2",
  "quote",
