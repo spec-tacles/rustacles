@@ -43,7 +43,7 @@ const STREAM_DATA_KEY: Field<'static> = Field(Cow::Borrowed(b"data"));
 const STREAM_TIMEOUT_KEY: Field<'static> = Field(Cow::Borrowed(b"timeout_at"));
 
 /// RedisBroker is internally reference counted and can be safely cloned.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RedisBroker<A>
 where
     A: ToSocketAddrs + Clone + Send + Sync + Debug,
@@ -55,6 +55,18 @@ where
     pub group: Bytes,
     pool: Pool<A>,
     last_autoclaim: Arc<RwLock<Id>>,
+}
+
+impl<A> Debug for RedisBroker<A>
+where
+    A: ToSocketAddrs + Clone + Send + Sync + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisBroker")
+            .field("name", &self.name)
+            .field("group", &self.group)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<A> RedisBroker<A>
@@ -75,7 +87,7 @@ where
     }
 
     /// Publishes an event to the broker. Returned value is the ID of the message.
-    #[instrument(ret, err)]
+    #[instrument(level = "debug", ret, err)]
     pub async fn publish(
         &self,
         event: impl AsRef<[u8]> + Debug,
@@ -97,7 +109,7 @@ where
         Ok(from_data(data)?)
     }
 
-    #[instrument(ret, err)]
+    #[instrument(level = "debug", ret, err)]
     pub async fn call(
         &self,
         event: &str,
@@ -118,7 +130,7 @@ where
         })
     }
 
-    #[instrument(ret, err)]
+    #[instrument(level = "debug", ret, err)]
     pub async fn publish_timeout(
         &self,
         event: impl AsRef<[u8]> + Debug,
@@ -150,7 +162,7 @@ where
         Ok(from_data(data)?)
     }
 
-    #[instrument(ret, err)]
+    #[instrument(level = "debug", err)]
     pub async fn subscribe(&self, events: impl Iterator<Item = &Bytes> + Debug) -> Result<()> {
         let mut conn = self.pool.get().await?;
 
@@ -228,7 +240,7 @@ where
         Ok::<_, Error>(iter(messages))
     }
 
-    #[instrument(ret, err)]
+    #[instrument(level = "trace", ret, err)]
     async fn xreadgroup(&self, events: &[Bytes]) -> Result<ReadResponse<'static>, Error> {
         let ids = vec![&b">"[..]; events.len()];
         let mut cmd: Vec<&[u8]> = vec![
@@ -250,7 +262,7 @@ where
         Ok(from_data(data)?)
     }
 
-    #[instrument(ret, err)]
+    #[instrument(level = "trace", ret, err)]
     async fn xautoclaim(&self, event: &[u8]) -> Result<Entries<'static>, Error> {
         let id = self.last_autoclaim.read().unwrap().to_string();
 

@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use redust::{model::pubsub, resp::from_data};
 use serde::de::DeserializeOwned;
 use tokio::net::ToSocketAddrs;
+use tracing::instrument;
 
 use crate::error::Result;
 
@@ -33,9 +34,10 @@ impl<A> Rpc<A>
 where
     A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
+    #[instrument(level = "debug", ret, err)]
     pub async fn response<V>(&self) -> Result<Option<V>>
     where
-        V: DeserializeOwned,
+        V: DeserializeOwned + Debug,
     {
         let mut conn = self.broker.pool.get().await?;
         conn.cmd(["SUBSCRIBE", &self.name]).await?;

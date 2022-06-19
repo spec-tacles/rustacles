@@ -9,6 +9,7 @@ use bytes::Bytes;
 use redust::model::stream::{read::Entry, Id};
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::net::ToSocketAddrs;
+use tracing::instrument;
 
 use crate::error::Result;
 
@@ -74,9 +75,11 @@ where
 impl<A, V> Message<A, V>
 where
     A: ToSocketAddrs + Clone + Send + Sync + Debug,
+    V: Debug,
 {
     /// Acknowledge receipt of the message. This should always be called, since un-acked messages
     /// will be reclaimed by other clients.
+    #[instrument(level = "debug")]
     pub async fn ack(&self) -> Result<()> {
         self.broker
             .pool
@@ -94,7 +97,8 @@ where
     }
 
     /// Reply to this message.
-    pub async fn reply(&self, data: &impl Serialize) -> Result<()> {
+    #[instrument(level = "debug")]
+    pub async fn reply(&self, data: &(impl Serialize + Debug)) -> Result<()> {
         let mut key = self.event.to_vec();
         write!(key, ":{}", self.id)?;
 
