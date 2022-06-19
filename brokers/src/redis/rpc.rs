@@ -1,11 +1,12 @@
 use std::fmt::Debug;
 
+use async_trait::async_trait;
 use redust::{model::pubsub, resp::from_data};
 use serde::de::DeserializeOwned;
 use tokio::net::ToSocketAddrs;
 use tracing::instrument;
 
-use crate::error::Result;
+use crate::{error::Result, common};
 
 use super::RedisBroker;
 
@@ -30,12 +31,13 @@ where
 
 impl<A> Eq for Rpc<A> where A: ToSocketAddrs + Clone + Send + Sync + Debug {}
 
-impl<A> Rpc<A>
+#[async_trait]
+impl<A> common::Rpc for Rpc<A>
 where
     A: ToSocketAddrs + Clone + Send + Sync + Debug,
 {
     #[instrument(level = "debug", ret, err)]
-    pub async fn response<V>(&self) -> Result<Option<V>>
+    async fn response<V>(&self) -> Result<Option<V>>
     where
         V: DeserializeOwned + Debug,
     {

@@ -350,6 +350,8 @@ mod test {
     use redust::pool::{Manager, Pool};
     use tokio::{spawn, try_join};
 
+    use crate::common::Message;
+
     use super::RedisBroker;
 
     #[tokio::test]
