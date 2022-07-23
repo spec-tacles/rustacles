@@ -163,7 +163,7 @@ where
     }
 
     #[instrument(level = "debug", err)]
-    pub async fn subscribe(&self, events: impl Iterator<Item = &Bytes> + Debug) -> Result<()> {
+    pub async fn ensure_events(&self, events: impl Iterator<Item = &Bytes> + Debug) -> Result<()> {
         let mut conn = self.pool.get().await?;
 
         for event in events {
@@ -363,7 +363,7 @@ mod test {
 
         let events = [Bytes::from("abc")];
 
-        broker.subscribe(events.iter()).await.expect("subscribed");
+        broker.ensure_events(events.iter()).await.expect("subscribed");
         broker
             .publish("abc", &[1u8, 2, 3])
             .await
@@ -392,7 +392,7 @@ mod test {
         let broker1 = RedisBroker::new(group, pool);
         let broker2 = broker1.clone();
 
-        broker1.subscribe(events.iter()).await.expect("subscribed");
+        broker1.ensure_events(events.iter()).await.expect("subscribed");
 
         let timeout = Some(SystemTime::now() + Duration::from_millis(500));
 
