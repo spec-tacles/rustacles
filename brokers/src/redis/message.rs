@@ -20,7 +20,7 @@ use super::{RedisBroker, STREAM_DATA_KEY, STREAM_TIMEOUT_KEY};
 #[derive(Debug, Clone)]
 pub struct Message<A, V>
 where
-    A: ToSocketAddrs + Clone + Send + Sync + Debug,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug + 'static,
 {
     /// The group this message belongs to.
     pub group: Bytes,

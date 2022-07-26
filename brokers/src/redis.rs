@@ -22,7 +22,7 @@ use redust::{
     resp::from_data,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::{net::ToSocketAddrs, time::sleep};
+use tokio::{net::ToSocketAddrs, spawn, time::sleep};
 use tracing::{debug, instrument};
 
 use crate::{
@@ -46,7 +46,7 @@ const STREAM_TIMEOUT_KEY: Field<'static> = Field(Cow::Borrowed(b"timeout_at"));
 #[derive(Clone)]
 pub struct RedisBroker<A>
 where
-    A: ToSocketAddrs + Clone + Send + Sync + Debug,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug + 'static,
 {
     /// The consumer name of this broker. Should be unique to the container/machine consuming
     /// messages.
@@ -209,7 +209,7 @@ where
             let this = this.clone();
             let events = events.clone();
 
-            async move { Some(this.get_messages(&events).await) }
+            async move { Some(this.get_messages(events).await) }
         };
 
         repeat_fn(fut_fn).try_flatten()
@@ -217,14 +217,17 @@ where
 
     async fn get_messages<V>(
         &self,
-        events: &[Bytes],
+        events: Vec<Bytes>,
     ) -> Result<impl TryStream<Ok = Message<A, V>, Error = Error>>
     where
         V: DeserializeOwned,
     {
         let this = self.clone();
-        let read = self.xreadgroup(events).await?;
+        let read = spawn(async move { this.xreadgroup(&events).await })
+            .await
+            .unwrap()?;
 
+        let this = self.clone();
         let messages = read.0.into_iter().flat_map(move |(event, entries)| {
             let this = this.clone();
             entries.0.into_iter().map(move |(id, entry)| {
@@ -322,7 +325,7 @@ where
         let this = self.clone();
         let event = event.clone();
 
-        let messages = async move {
+        let messages = spawn(async move {
             sleep(DEFAULT_BLOCK_DURATION).await;
 
             let messages = this
@@ -335,9 +338,9 @@ where
                 });
 
             Ok::<_, Error>(iter(messages))
-        };
+        });
 
-        async move { Some(messages.await) }
+        async move { Some(messages.await.unwrap()) }
     }
 }
 
@@ -363,7 +366,10 @@ mod test {
 
         let events = [Bytes::from("abc")];
 
-        broker.ensure_events(events.iter()).await.expect("subscribed");
+        broker
+            .ensure_events(events.iter())
+            .await
+            .expect("subscribed");
         broker
             .publish("abc", &[1u8, 2, 3])
             .await
@@ -392,7 +398,10 @@ mod test {
         let broker1 = RedisBroker::new(group, pool);
         let broker2 = broker1.clone();
 
-        broker1.ensure_events(events.iter()).await.expect("subscribed");
+        broker1
+            .ensure_events(events.iter())
+            .await
+            .expect("subscribed");
 
         let timeout = Some(SystemTime::now() + Duration::from_millis(500));
 

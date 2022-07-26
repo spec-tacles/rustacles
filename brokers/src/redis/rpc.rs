@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use tokio::net::ToSocketAddrs;
 use tracing::instrument;
 
-use crate::{error::Result, common};
+use crate::{common, error::Result};
 
 use super::RedisBroker;
 
@@ -14,7 +14,7 @@ use super::RedisBroker;
 #[derive(Debug, Clone)]
 pub struct Rpc<A>
 where
-    A: ToSocketAddrs + Clone + Send + Sync + Debug,
+    A: ToSocketAddrs + Clone + Send + Sync + Debug + 'static,
 {
     pub(crate) name: String,
     pub(crate) broker: RedisBroker<A>,
