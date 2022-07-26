@@ -197,7 +197,7 @@ where
         let autoclaim = self.autoclaim_all::<V>(events.clone()).into_stream();
         let claim = self.claim::<V>(events).into_stream();
 
-        select(autoclaim, claim)
+        select(claim, autoclaim)
     }
 
     fn claim<V>(&self, events: Vec<Bytes>) -> impl TryStream<Ok = Message<A, V>, Error = Error>
