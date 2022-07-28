@@ -1524,7 +1524,7 @@ dependencies = [
 [[package]]
 name = "redust"
 version = "0.3.0"
-source = "git+https://github.com/appellation/redust#fe05696198547920c73ea013a2c51c101eb6f83d"
+source = "git+https://github.com/appellation/redust#b1f80e04ccfe85e5c3f0180775b02e42f74cb95c"
 dependencies = [
  "async-trait",
  "bytes 1.2.0",
@@ -1542,7 +1542,7 @@ dependencies = [
 [[package]]
 name = "redust-resp"
 version = "0.2.1"
-source = "git+https://github.com/appellation/redust#fe05696198547920c73ea013a2c51c101eb6f83d"
+source = "git+https://github.com/appellation/redust#b1f80e04ccfe85e5c3f0180775b02e42f74cb95c"
 dependencies = [
  "bytes 1.2.0",
  "itertools",
