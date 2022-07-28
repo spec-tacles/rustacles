@@ -40,7 +40,7 @@ pub type ShardStream = SplitStream<
     WebSocketStream<
         TungsteniteStream<
             TokioAdapter<TcpStream>,
-            TokioAdapter<TlsStream<TokioAdapter<TokioAdapter<TcpStream>>>>,
+            TokioAdapter<TlsStream<TcpStream>>,
         >,
     >,
 >;

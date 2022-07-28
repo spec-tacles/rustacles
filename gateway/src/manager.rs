@@ -147,7 +147,7 @@ impl ShardManager {
         tokio::spawn(async move {
             for id in 0..shard_count {
                 debug!("CREATING Shard {}", id);
-                tokio::time::delay_for(Duration::from_secs(6)).await;
+                tokio::time::sleep(Duration::from_secs(6)).await;
                 let count = shard_count.clone();
                 let shard = Shard::new(token.clone(), [id, count], ws.clone()).await;
                 let shard = Arc::new(Mutex::new(shard.expect("Failed to create shard")));
