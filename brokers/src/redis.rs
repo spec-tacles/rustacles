@@ -7,8 +7,8 @@ use std::{
 
 use bytes::Bytes;
 use futures::{
-    stream::{iter, select, select_all},
-    Future, TryStream, TryStreamExt,
+    stream::{iter, repeat_with, select, select_all},
+    StreamExt, TryFutureExt, TryStream, TryStreamExt,
 };
 use nanoid::nanoid;
 pub use redust;
@@ -22,7 +22,7 @@ use redust::{
     resp::from_data,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::{net::ToSocketAddrs, spawn, time::sleep};
+use tokio::{net::ToSocketAddrs, time::sleep};
 use tracing::{debug, instrument};
 
 use crate::{
@@ -187,12 +187,12 @@ where
     }
 
     /// Consume events from the broker.
-    pub fn consume<V>(
-        &self,
+    pub fn consume<'s, V>(
+        &'s self,
         events: Vec<Bytes>,
-    ) -> impl TryStream<Ok = Message<A, V>, Error = Error>
+    ) -> impl TryStream<Ok = Message<A, V>, Error = Error> + Unpin + 's
     where
-        V: DeserializeOwned + 'static,
+        V: DeserializeOwned + 's,
     {
         let autoclaim = self.autoclaim_all::<V>(events.clone()).into_stream();
         let claim = self.claim::<V>(events).into_stream();
@@ -200,51 +200,42 @@ where
         select(autoclaim, claim)
     }
 
-    fn claim<V>(&self, events: Vec<Bytes>) -> impl TryStream<Ok = Message<A, V>, Error = Error>
+    fn claim<'s, V>(
+        &'s self,
+        events: Vec<Bytes>,
+    ) -> impl TryStream<Ok = Message<A, V>, Error = Error> + Unpin + 's
     where
-        V: DeserializeOwned,
+        V: DeserializeOwned + 's,
     {
-        let this = self.clone();
         let fut_fn = move || {
-            let this = this.clone();
-            let events = events.clone();
-
-            async move { Some(this.get_messages(events).await) }
+            self.get_messages(events.clone())
+                .map_ok(|msgs| iter(msgs.map(Ok)))
+                .try_flatten_stream()
         };
 
-        repeat_fn(fut_fn).try_flatten()
+        Box::pin(repeat_with(fut_fn).flatten())
     }
 
-    async fn get_messages<V>(
-        &self,
+    async fn get_messages<'s, V>(
+        &'s self,
         events: Vec<Bytes>,
-    ) -> Result<impl TryStream<Ok = Message<A, V>, Error = Error>>
+    ) -> Result<impl Iterator<Item = Message<A, V>> + Unpin + 's>
     where
         V: DeserializeOwned,
     {
-        let this = self.clone();
-        let read = spawn(async move { this.xreadgroup(&events).await })
-            .await
-            .unwrap()?;
+        let read = self.xreadgroup(&events).await?.unwrap_or_default();
 
-        let this = self.clone();
         let messages = read.0.into_iter().flat_map(move |(event, entries)| {
-            let this = this.clone();
             entries.0.into_iter().map(move |(id, entry)| {
-                Ok(Message::<A, V>::new(
-                    id,
-                    entry,
-                    Bytes::copy_from_slice(&event.0),
-                    this.clone(),
-                ))
+                Message::<A, V>::new(id, entry, Bytes::copy_from_slice(&event.0), self.clone())
             })
         });
 
-        Ok::<_, Error>(iter(messages))
+        Ok(messages)
     }
 
     #[instrument(level = "trace", ret, err)]
-    async fn xreadgroup(&self, events: &[Bytes]) -> Result<ReadResponse<'static>, Error> {
+    async fn xreadgroup(&self, events: &[Bytes]) -> Result<Option<ReadResponse<'static>>, Error> {
         let ids = vec![&b">"[..]; events.len()];
         let mut cmd: Vec<&[u8]> = vec![
             b"XREADGROUP",
@@ -290,23 +281,25 @@ where
         Ok(res.1)
     }
 
-    fn autoclaim_all<V>(
-        &self,
+    fn autoclaim_all<'s, V>(
+        &'s self,
         events: Vec<Bytes>,
-    ) -> impl TryStream<Ok = Message<A, V>, Error = Error>
+    ) -> impl TryStream<Ok = Message<A, V>, Error = Error> + 's
     where
-        V: DeserializeOwned,
+        V: DeserializeOwned + 's,
     {
-        let futs = events
+        let streams = events
             .into_iter()
             .map(|event| {
-                let this = self.clone();
-                move || this.autoclaim_event(event.clone())
+                move || {
+                    let event = event.clone();
+                    async move { Some(self.autoclaim_event(event).await) }
+                }
             })
             .map(repeat_fn)
             .map(TryStreamExt::try_flatten);
 
-        select_all(futs)
+        select_all(streams)
     }
 
     /// Autoclaim an event and return a stream of messages found during the autoclaim. The returned
@@ -315,117 +308,24 @@ where
     ///
     /// Delays every invocation of `xautoclaim` by [`DEFAULT_BLOCK_DURATION`], since `xautoclaim`
     /// does not support blocking.
-    fn autoclaim_event<V>(
-        &self,
+    async fn autoclaim_event<'s, V>(
+        &'s self,
         event: Bytes,
-    ) -> impl Future<Output = Option<Result<impl TryStream<Ok = Message<A, V>, Error = Error>>>>
+    ) -> Result<impl TryStream<Ok = Message<A, V>, Error = Error> + 's>
     where
         V: DeserializeOwned,
     {
-        let this = self.clone();
-        let event = event.clone();
+        sleep(DEFAULT_BLOCK_DURATION).await;
 
-        let messages = spawn(async move {
-            sleep(DEFAULT_BLOCK_DURATION).await;
+        let messages = self
+            .xautoclaim(&event)
+            .await?
+            .0
+            .into_iter()
+            .map(move |(id, data)| {
+                Ok::<_, Error>(Message::<A, V>::new(id, data, event.clone(), self.clone()))
+            });
 
-            let messages = this
-                .xautoclaim(&event)
-                .await?
-                .0
-                .into_iter()
-                .map(move |(id, data)| {
-                    Ok::<_, Error>(Message::<A, V>::new(id, data, event.clone(), this.clone()))
-                });
-
-            Ok::<_, Error>(iter(messages))
-        });
-
-        async move { Some(messages.await.unwrap()) }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::time::{Duration, SystemTime};
-
-    use bytes::Bytes;
-    use futures::TryStreamExt;
-    use redust::pool::{Manager, Pool};
-    use tokio::{spawn, try_join};
-
-    use crate::common::Message;
-
-    use super::RedisBroker;
-
-    #[tokio::test]
-    async fn consumes_messages() {
-        let group = "foo";
-        let manager = Manager::new("localhost:6379");
-        let pool = Pool::builder(manager).build().expect("pool builder");
-        let broker = RedisBroker::new(group, pool);
-
-        let events = [Bytes::from("abc")];
-
-        broker
-            .ensure_events(events.iter())
-            .await
-            .expect("subscribed");
-        broker
-            .publish("abc", &[1u8, 2, 3])
-            .await
-            .expect("published");
-
-        let mut consumer = broker.consume::<Vec<u8>>(events.to_vec());
-        let msg = consumer
-            .try_next()
-            .await
-            .expect("read message")
-            .expect("read message");
-        msg.ack().await.expect("ack");
-
-        assert_eq!(msg.data.expect("data"), vec![1, 2, 3]);
-    }
-
-    #[tokio::test]
-    async fn rpc_timeout() {
-        let group = "foo";
-        let event = "def";
-        let events = [Bytes::from(event)];
-
-        let manager = Manager::new("localhost:6379");
-        let pool = Pool::builder(manager).build().expect("pool builder");
-
-        let broker1 = RedisBroker::new(group, pool);
-        let broker2 = broker1.clone();
-
-        broker1
-            .ensure_events(events.iter())
-            .await
-            .expect("subscribed");
-
-        let timeout = Some(SystemTime::now() + Duration::from_millis(500));
-
-        let call_fut = spawn(async move {
-            broker2
-                .call(event, &[1u8, 2, 3], timeout)
-                .await
-                .expect("published");
-        });
-
-        let consume_fut = spawn(async move {
-            let mut consumer = broker1.consume::<Vec<u8>>(events.to_vec());
-            let msg = consumer
-                .try_next()
-                .await
-                .expect("message")
-                .expect("message");
-
-            msg.ack().await.expect("ack");
-
-            assert_eq!(msg.data.as_ref().expect("data"), &[1, 2, 3]);
-            assert_eq!(msg.timeout_at, timeout);
-        });
-
-        try_join!(consume_fut, call_fut).expect("cancelation futures");
+        Ok(iter(messages))
     }
 }
