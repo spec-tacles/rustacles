@@ -93,7 +93,7 @@ where
         event: impl AsRef<[u8]> + Debug,
         data: &(impl Serialize + Debug),
     ) -> Result<Id> {
-        let serialized_data = rmp_serde::to_vec(data)?;
+        let serialized_data = rmp_serde::to_vec_named(data)?;
         let mut conn = self.pool.get().await?;
 
         let data = conn
@@ -137,7 +137,7 @@ where
         data: &(impl Serialize + Debug),
         timeout: SystemTime,
     ) -> Result<Id> {
-        let serialized_data = rmp_serde::to_vec(data)?;
+        let serialized_data = rmp_serde::to_vec_named(data)?;
         let mut conn = self.pool.get().await?;
 
         let timeout_bytes = timeout

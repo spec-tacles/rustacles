@@ -104,7 +104,7 @@ where
         let mut key = self.event.to_vec();
         write!(key, ":{}", self.id)?;
 
-        let serialized = rmp_serde::to_vec(data)?;
+        let serialized = rmp_serde::to_vec_named(data)?;
         self.broker
             .pool
             .get()
